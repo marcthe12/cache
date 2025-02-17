@@ -2,16 +2,10 @@ package cache
 
 import (
 	"bytes"
-	"hash/fnv"
 	"iter"
 	"sync"
 	"time"
 )
-
-func zero[T any]() T {
-	var ret T
-	return ret
-}
 
 type Map[K any, V any] interface {
 	Set(key K, value V, ttl time.Duration) error
@@ -32,14 +26,27 @@ type Node struct {
 	EvictPrev  *Node
 }
 
+func (n *Node) IsValid() bool {
+	return n.Expiration.IsZero() || n.Expiration.After(time.Now())
+}
+
+func (n *Node) Detach() {
+}
+
 type Store struct {
 	bucket   []Node
 	lenght   uint64
 	cost     uint64
 	evict    Node
-	max_cost uint64
-	strategy EvictionStrategies
+	maxCost  uint64
+	strategy EvictionPolicy
 	mu       sync.RWMutex
+}
+
+func (s *Store) Init() {
+	s.Clear()
+	s.strategy.evict = &s.evict
+	s.strategy.SetPolicy(StrategyNone)
 }
 
 func (s *Store) Clear() {
@@ -52,14 +59,6 @@ func (s *Store) Clear() {
 
 	s.evict.EvictNext = &s.evict
 	s.evict.EvictPrev = &s.evict
-}
-
-func hash(data []byte) uint64 {
-	hasher := fnv.New64()
-	if _, err := hasher.Write(data); err != nil {
-		panic(err)
-	}
-	return hasher.Sum64()
 }
 
 func lookup(s *Store, key []byte) (uint64, uint64) {
@@ -86,8 +85,11 @@ func (s *Store) Get(key []byte) ([]byte, time.Duration, bool) {
 
 	for v := bucket.HashNext; v != bucket; v = v.HashNext {
 		if bytes.Equal(key, v.Key) {
+			if !v.IsValid() {
+				return nil, 0, false
+			}
 			s.strategy.OnAccess(v)
-			return v.Value, 0, true
+			return v.Value, time.Until(v.Expiration), true
 		}
 	}
 
@@ -98,6 +100,9 @@ func resize(s *Store) {
 	bucket := make([]Node, 2*len(s.bucket))
 
 	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
+		if !v.IsValid() {
+			continue
+		}
 		idx := v.Hash % uint64(len(bucket))
 
 		n := &bucket[idx]
@@ -110,6 +115,23 @@ func resize(s *Store) {
 	}
 
 	s.bucket = bucket
+}
+
+func cleanup(s *Store) {
+	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
+		if !v.IsValid() {
+			deleteNode(s, v)
+		}
+	}
+}
+
+func evict(s *Store) bool {
+	n := s.strategy.Evict()
+	if n == nil {
+		return false
+	}
+	deleteNode(s, n)
+	return true
 }
 
 func (s *Store) Set(key []byte, value []byte, ttl time.Duration) {
@@ -138,10 +160,13 @@ func (s *Store) Set(key []byte, value []byte, ttl time.Duration) {
 	}
 
 	node := &Node{
-		Hash:       hash,
-		Key:        key,
-		Value:      value,
-		Expiration: time.Now().Add(ttl),
+		Hash:  hash,
+		Key:   key,
+		Value: value,
+	}
+
+	if ttl != 0 {
+		node.Expiration = time.Now().Add(ttl)
 	}
 
 	node.HashPrev = bucket
@@ -156,6 +181,21 @@ func (s *Store) Set(key []byte, value []byte, ttl time.Duration) {
 	s.lenght = s.lenght + 1
 }
 
+func deleteNode(s *Store, v *Node) {
+	v.HashNext.HashPrev = v.HashPrev
+	v.HashPrev.HashNext = v.HashNext
+	v.HashNext = nil
+	v.HashPrev = nil
+
+	v.EvictNext.EvictPrev = v.EvictPrev
+	v.EvictPrev.EvictNext = v.EvictNext
+	v.EvictNext = nil
+	v.EvictPrev = nil
+
+	s.cost = s.cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
+	s.lenght = s.lenght - 1
+}
+
 func (s *Store) Delete(key []byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,18 +208,7 @@ func (s *Store) Delete(key []byte) bool {
 
 	for v := bucket.HashNext; v != bucket; v = v.HashNext {
 		if bytes.Equal(key, v.Key) {
-			v.HashNext.HashPrev = v.HashPrev
-			v.HashPrev.HashNext = v.HashNext
-			v.HashNext = nil
-			v.HashPrev = nil
-
-			v.EvictNext.EvictPrev = v.EvictPrev
-			v.EvictPrev.EvictNext = v.EvictNext
-			v.EvictNext = nil
-			v.EvictPrev = nil
-
-			s.cost = s.cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
-			s.lenght = s.lenght - 1
+			deleteNode(s, v)
 			return true
 		}
 	}

@@ -6,13 +6,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func setupTestStore(t testing.TB) *Store {
+	t.Helper()
+
+	store := &Store{}
+	store.Init()
+	return store
+}
+
 func TestStoreGetSet(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := &New[any, any]().Store
+		store := setupTestStore(t)
+
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 0)
 		got, _, ok := store.Get([]byte("Key"))
@@ -23,7 +32,8 @@ func TestStoreGetSet(t *testing.T) {
 	t.Run("Not Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := &New[any, any]().Store
+		store := setupTestStore(t)
+
 		_, _, ok := store.Get([]byte("Key"))
 		assert.False(t, ok)
 	})
@@ -31,7 +41,8 @@ func TestStoreGetSet(t *testing.T) {
 	t.Run("Update", func(t *testing.T) {
 		t.Parallel()
 
-		store := &New[any, any]().Store
+		store := setupTestStore(t)
+
 		store.Set([]byte("Key"), []byte("Other"), 0)
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 0)
@@ -47,7 +58,8 @@ func TestStoreDelete(t *testing.T) {
 	t.Run("Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := &New[any, any]().Store
+		store := setupTestStore(t)
+
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 0)
 		ok := store.Delete([]byte("Key"))
@@ -59,7 +71,8 @@ func TestStoreDelete(t *testing.T) {
 	t.Run("Not Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := &New[any, any]().Store
+		store := setupTestStore(t)
+
 		ok := store.Delete([]byte("Key"))
 		assert.False(t, ok)
 	})
@@ -68,7 +81,8 @@ func TestStoreDelete(t *testing.T) {
 func TestStoreClear(t *testing.T) {
 	t.Parallel()
 
-	store := &New[any, any]().Store
+	store := setupTestStore(t)
+
 	want := []byte("Value")
 	store.Set([]byte("Key"), want, 0)
 	store.Clear()
@@ -76,65 +90,9 @@ func TestStoreClear(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestHashMapGetSet(t *testing.T) {
-	t.Parallel()
-
-	t.Run("Exists", func(t *testing.T) {
-		t.Parallel()
-
-		store := New[string, string]()
-		want := "Value"
-		store.Set("Key", want, 0)
-		got, _, err := store.Get("Key")
-		assert.Equal(t, want, got)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Not Exists", func(t *testing.T) {
-		t.Parallel()
-
-		store := New[string, string]()
-		_, _, err := store.Get("Key")
-		assert.ErrorIs(t, err, ErrKeyNotFound)
-	})
-
-	t.Run("Update", func(t *testing.T) {
-		t.Parallel()
-
-		store := New[string, string]()
-		store.Set("Key", "Other", 0)
-		want := "Value"
-		store.Set("Key", want, 0)
-		got, _, err := store.Get("Key")
-		assert.Equal(t, want, got)
-		assert.NoError(t, err)
-	})
-}
-
-func TestHashMapDelete(t *testing.T) {
-	t.Parallel()
-
-	t.Run("Exists", func(t *testing.T) {
-		t.Parallel()
-
-		store := New[string, string]()
-		want := "Value"
-		store.Set("Key", want, 0)
-		err := store.Delete("Key")
-		assert.NoError(t, err)
-	})
-
-	t.Run("Not Exists", func(t *testing.T) {
-		t.Parallel()
-
-		store := New[string, string]()
-		err := store.Delete("Key")
-		assert.ErrorIs(t, err, ErrKeyNotFound)
-	})
-}
-
 func BenchmarkStoreGet(b *testing.B) {
-	store := &New[any, any]().Store
+	store := setupTestStore(b)
+
 	key := []byte("Key")
 	store.Set(key, []byte("Store"), 0)
 	b.SetBytes(1)
@@ -146,7 +104,8 @@ func BenchmarkStoreGet(b *testing.B) {
 }
 
 func BenchmarkStoreSet(b *testing.B) {
-	store := &New[any, any]().Store
+	store := setupTestStore(b)
+
 	key := []byte("Key")
 	b.SetBytes(1)
 	b.RunParallel(func(pb *testing.PB) {

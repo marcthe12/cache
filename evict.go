@@ -2,10 +2,10 @@ package cache
 
 import "errors"
 
-type EvictionPolicy int
+type EvictionPolicyType int
 
 const (
-	StrategyNone EvictionPolicy = iota
+	StrategyNone EvictionPolicyType = iota
 	StrategyFIFO
 	StrategyLRU
 	StrategyLFU
@@ -17,23 +17,30 @@ type EvictionStrategies interface {
 	Evict() *Node
 }
 
-func (e EvictionPolicy) ToStratergy(evict *Node) (EvictionStrategies, error) {
-	store := map[EvictionPolicy]func() EvictionStrategies{
+type EvictionPolicy struct {
+	EvictionStrategies
+	Type  EvictionPolicyType
+	evict *Node
+}
+
+func (e *EvictionPolicy) SetPolicy(y EvictionPolicyType) error {
+	store := map[EvictionPolicyType]func() EvictionStrategies{
 		StrategyNone: func() EvictionStrategies {
-			return NoneStrategies{evict: evict}
+			return NoneStrategies{evict: e.evict}
 		},
 		StrategyFIFO: func() EvictionStrategies {
-			return FIFOStrategies{evict: evict}
+			return FIFOStrategies{evict: e.evict}
 		},
 		StrategyLRU: func() EvictionStrategies {
-			return LRUStrategies{evict: evict}
+			return LRUStrategies{evict: e.evict}
 		},
 	}
-	factory, ok := store[e]
+	factory, ok := store[y]
 	if !ok {
-		return nil, errors.New("Invalid Policy")
+		return errors.New("Invalid Policy")
 	}
-	return factory(), nil
+	e.EvictionStrategies = factory()
+	return nil
 }
 
 type NoneStrategies struct {
@@ -102,7 +109,6 @@ func (s LFUStrategies) OnInsert(node *Node) {
 	node.EvictNext = node.EvictPrev.EvictNext
 	node.EvictNext.EvictPrev = node
 	node.EvictPrev.EvictNext = node
-
 }
 
 func (s LFUStrategies) OnAccess(node *Node) {

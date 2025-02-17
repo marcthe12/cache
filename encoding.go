@@ -140,6 +140,8 @@ func (s *Store) Snapshot(w io.WriteSeeker) error {
 	w.Seek(0, io.SeekStart)
 	wr := NewEncoder(w)
 
+	wr.EncodeUint64(s.maxCost)
+	wr.EncodeUint64(uint64(s.strategy.Type))
 	wr.EncodeUint64(s.lenght)
 
 	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
@@ -154,6 +156,18 @@ func (s *Store) Snapshot(w io.WriteSeeker) error {
 func (s *Store) LoadSnapshot(r io.ReadSeeker) error {
 	r.Seek(0, io.SeekStart)
 	rr := NewDecoder(r)
+
+	maxCost, err := rr.DecodeUint64()
+	if err != nil {
+		return err
+	}
+	s.maxCost = maxCost
+
+	policy, err := rr.DecodeUint64()
+	if err != nil {
+		return err
+	}
+	s.strategy.SetPolicy(EvictionPolicyType(policy))
 
 	lenght, err := rr.DecodeUint64()
 	if err != nil {

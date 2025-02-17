@@ -2,6 +2,7 @@ package cache
 
 import (
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -10,14 +11,16 @@ import (
 )
 
 type DB[K any, V any] struct {
-	file  *os.File
-	Store Store
-	stop  chan struct{}
-	wg    sync.WaitGroup
+	file           io.WriteSeeker
+	Store          Store
+	snapshotTicker *pauseTimer
+	cleanupTicker *pauseTimer
+	stop           chan struct{}
+	wg             sync.WaitGroup
 }
 
 func OpenFile[K any, V any](filename string) (*DB[K, V], error) {
-	ret := &DB[K, V]{}
+	ret := OpenMem[K, V]()
 	file, err := os.OpenFile(filename, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		file, err := os.Create(filename)
@@ -25,48 +28,60 @@ func OpenFile[K any, V any](filename string) (*DB[K, V], error) {
 			return nil, err
 		}
 		ret.file = file
-		ret.SetStratergy(StrategyNone)
-		ret.Clear()
 		ret.Flush()
 	} else if err == nil {
-		ret.Clear()
+		ret.Store.LoadSnapshot(file)
 		ret.file = file
-		ret.Store.LoadSnapshot(ret.file)
 	} else {
 		return nil, err
 	}
-	ret.wg.Add(1)
-	go ret.backgroundWorker()
+
 	return ret, nil
 }
 
 func OpenMem[K any, V any]() *DB[K, V] {
-	ret := &DB[K, V]{}
-	ret.SetStratergy(StrategyNone)
+	ret := &DB[K, V]{
+		snapshotTicker: newPauseTimer(0),
+	}
+	ret.snapshotTicker.Stop()
 	ret.Clear()
+	ret.Store.strategy.evict = &ret.Store.evict
+	ret.SetStratergy(StrategyNone)
 	return ret
 }
 
-func (d *DB[K, V]) SetStratergy(e EvictionPolicy) error {
-	strategy, err := e.ToStratergy(&d.Store.evict)
-	if err != nil {
-		return err
-	}
-	d.Store.strategy = strategy
-	return nil
+func (d *DB[K, V]) Start() {
+	d.stop = make(chan struct{})
+	d.wg.Add(1)
+	go d.backgroundWorker()
 }
 
-func (d *DB[K, V]) SetMaxCost(e EvictionPolicy) {
-	d.Store.max_cost = d.Store.max_cost
+func (d *DB[K, V]) SetStratergy(e EvictionPolicyType) error {
+	return d.Store.strategy.SetPolicy(e)
+}
+
+func (d *DB[K, V]) SetMaxCost(e EvictionPolicyType) {
+	d.Store.maxCost = d.Store.maxCost
+}
+
+func (d *DB[K, V]) SetSnapshotTime(t time.Duration) {
+	d.snapshotTicker.Reset(t)
 }
 
 func (d *DB[K, V]) backgroundWorker() {
 	defer d.wg.Done()
+
+	d.snapshotTicker.Resume()
+	defer d.snapshotTicker.Stop()
+
 	for {
 		select {
 		case <-d.stop:
 			return
-			// TODO: Do house keeping
+		case <-d.snapshotTicker.C:
+			d.Flush()
+		case <-d.snapshotTicker.C:
+			d.Flush()
 		}
 	}
 }
@@ -77,7 +92,10 @@ func (d *DB[K, V]) Close() {
 	d.Flush()
 	d.Clear()
 	if d.file != nil {
-		d.file.Close()
+		closer, ok := d.file.(io.Closer)
+		if ok {
+			closer.Close()
+		}
 	}
 }
 
