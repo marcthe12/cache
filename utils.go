@@ -22,6 +22,12 @@ func newPauseTimer(d time.Duration) *pauseTimer {
 	return ret
 }
 
+func newPauseTimerStopped(d time.Duration) *pauseTimer {
+	ret := newPauseTimer(d)
+	ret.Stop()
+	return ret
+}
+
 func (t *pauseTimer) Reset(d time.Duration) {
 	t.duration = d
 	if t.duration == 0 {

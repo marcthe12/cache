@@ -6,10 +6,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func setupTestStore(t testing.TB) *Store {
+func setupTestStore(t testing.TB) *store {
 	t.Helper()
 
-	store := &Store{}
+	store := &store{}
 	store.Init()
 	return store
 }

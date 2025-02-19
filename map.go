@@ -2,104 +2,115 @@ package cache
 
 import (
 	"bytes"
-	"iter"
 	"sync"
 	"time"
 )
 
-type Map[K any, V any] interface {
-	Set(key K, value V, ttl time.Duration) error
-	Get(key K) (V, time.Duration, error)
-	Delete(key K) error
-	Clear() iter.Seq2[K, V]
-}
-
-type Node struct {
+type node struct {
 	Hash       uint64
 	Expiration time.Time
 	Access     uint64
 	Key        []byte
 	Value      []byte
-	HashNext   *Node
-	HashPrev   *Node
-	EvictNext  *Node
-	EvictPrev  *Node
+	HashNext   *node
+	HashPrev   *node
+	EvictNext  *node
+	EvictPrev  *node
 }
 
-func (n *Node) IsValid() bool {
+func (n *node) IsValid() bool {
 	return n.Expiration.IsZero() || n.Expiration.After(time.Now())
 }
 
-func (n *Node) Detach() {
+func (n *node) TTL() time.Duration {
+	if n.Expiration.IsZero() {
+		return 0
+	} else {
+		return time.Until(n.Expiration)
+	}
 }
 
-type Store struct {
-	bucket   []Node
-	lenght   uint64
-	cost     uint64
-	evict    Node
-	maxCost  uint64
-	strategy EvictionPolicy
-	mu       sync.RWMutex
+type store struct {
+	Bucket  []node
+	Lenght  uint64
+	Cost    uint64
+	Evict   node
+	MaxCost uint64
+	Policy  evictionPolicy
+	mu      sync.Mutex
 }
 
-func (s *Store) Init() {
+func (s *store) Init() {
 	s.Clear()
-	s.strategy.evict = &s.evict
-	s.strategy.SetPolicy(StrategyNone)
+	s.Policy.evict = &s.Evict
+	s.Policy.SetPolicy(PolicyNone)
 }
 
-func (s *Store) Clear() {
+func (s *store) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.bucket = make([]Node, 8)
-	s.lenght = 0
-	s.cost = 0
+	s.Bucket = make([]node, 8)
+	s.Lenght = 0
+	s.Cost = 0
 
-	s.evict.EvictNext = &s.evict
-	s.evict.EvictPrev = &s.evict
+	s.Evict.EvictNext = &s.Evict
+	s.Evict.EvictPrev = &s.Evict
 }
 
-func lookup(s *Store, key []byte) (uint64, uint64) {
+func lookup(s *store, key []byte) (uint64, uint64) {
 	hash := hash(key)
-	return hash % uint64(len(s.bucket)), hash
+	return hash % uint64(len(s.Bucket)), hash
 }
 
-func lazyInitBucket(n *Node) {
+func lazyInitBucket(n *node) {
 	if n.HashNext == nil {
 		n.HashNext = n
 		n.HashPrev = n
 	}
 }
 
-func (s *Store) Get(key []byte) ([]byte, time.Duration, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *store) lookup(key []byte) (*node, uint64, uint64) {
+	idx, hash := lookup(s, key)
 
-	idx, _ := lookup(s, key)
-
-	bucket := &s.bucket[idx]
+	bucket := &s.Bucket[idx]
 
 	lazyInitBucket(bucket)
 
 	for v := bucket.HashNext; v != bucket; v = v.HashNext {
 		if bytes.Equal(key, v.Key) {
-			if !v.IsValid() {
-				return nil, 0, false
-			}
-			s.strategy.OnAccess(v)
-			return v.Value, time.Until(v.Expiration), true
+			return v, idx, hash
 		}
+	}
+
+	return nil, idx, hash
+}
+
+func (s *store) get(key []byte) ([]byte, time.Duration, bool) {
+	v, _, _ := s.lookup(key)
+	if v != nil {
+		if !v.IsValid() {
+			deleteNode(s, v)
+			return nil, 0, false
+		}
+		s.Policy.OnAccess(v)
+		return v.Value, v.TTL(), true
 	}
 
 	return nil, 0, false
 }
 
-func resize(s *Store) {
-	bucket := make([]Node, 2*len(s.bucket))
+func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
+	return s.get(key)
+}
+
+func resize(s *store) {
+	bucket := make([]node, 2*len(s.Bucket))
+
+	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
 		if !v.IsValid() {
 			continue
 		}
@@ -114,52 +125,46 @@ func resize(s *Store) {
 		v.HashPrev.HashNext = v
 	}
 
-	s.bucket = bucket
+	s.Bucket = bucket
 }
 
-func cleanup(s *Store) {
-	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
+func cleanup(s *store) {
+	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
 		if !v.IsValid() {
 			deleteNode(s, v)
 		}
 	}
 }
 
-func evict(s *Store) bool {
-	n := s.strategy.Evict()
-	if n == nil {
-		return false
+func evict(s *store) bool {
+	for s.MaxCost != 0 && s.MaxCost < s.Cost {
+		n := s.Policy.Evict()
+		if n == nil {
+			break
+		}
+		deleteNode(s, n)
 	}
-	deleteNode(s, n)
 	return true
 }
 
-func (s *Store) Set(key []byte, value []byte, ttl time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	idx, hash := lookup(s, key)
-	bucket := &s.bucket[idx]
-
-	lazyInitBucket(bucket)
-
-	for v := bucket.HashNext; v != bucket; v = v.HashNext {
-		if bytes.Equal(key, v.Key) {
-			s.cost = s.cost + uint64(len(value)) - uint64(len(v.Value))
-			v.Value = value
-			v.Expiration = time.Now().Add(ttl)
-			s.strategy.OnAccess(v)
-		}
+func (s *store) set(key []byte, value []byte, ttl time.Duration) {
+	v, idx, hash := s.lookup(key)
+	if v != nil {
+		s.Cost = s.Cost + uint64(len(value)) - uint64(len(v.Value))
+		v.Value = value
+		v.Expiration = time.Now().Add(ttl)
+		s.Policy.OnAccess(v)
 	}
 
-	if float64(s.lenght)/float64(len(s.bucket)) > 0.75 {
+	bucket := &s.Bucket[idx]
+	if float64(s.Lenght)/float64(len(s.Bucket)) > 0.75 {
 		resize(s)
 		//resize may invidate pointer to bucket
-		bucket = &s.bucket[idx]
+		bucket = &s.Bucket[idx]
 		lazyInitBucket(bucket)
 	}
 
-	node := &Node{
+	node := &node{
 		Hash:  hash,
 		Key:   key,
 		Value: value,
@@ -174,14 +179,20 @@ func (s *Store) Set(key []byte, value []byte, ttl time.Duration) {
 	node.HashNext.HashPrev = node
 	node.HashPrev.HashNext = node
 
-	s.strategy.OnInsert(node)
-	s.strategy.OnAccess(node)
+	s.Policy.OnInsert(node)
 
-	s.cost = s.cost + uint64(len(key)) + uint64(len(value))
-	s.lenght = s.lenght + 1
+	s.Cost = s.Cost + uint64(len(key)) + uint64(len(value))
+	s.Lenght = s.Lenght + 1
 }
 
-func deleteNode(s *Store, v *Node) {
+func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.set(key, value, ttl)
+}
+
+func deleteNode(s *store, v *node) {
 	v.HashNext.HashPrev = v.HashPrev
 	v.HashPrev.HashNext = v.HashNext
 	v.HashNext = nil
@@ -192,30 +203,23 @@ func deleteNode(s *Store, v *Node) {
 	v.EvictNext = nil
 	v.EvictPrev = nil
 
-	s.cost = s.cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
-	s.lenght = s.lenght - 1
+	s.Cost = s.Cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
+	s.Lenght = s.Lenght - 1
 }
 
-func (s *Store) Delete(key []byte) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	idx, _ := lookup(s, key)
-
-	bucket := &s.bucket[idx]
-
-	lazyInitBucket(bucket)
-
-	for v := bucket.HashNext; v != bucket; v = v.HashNext {
-		if bytes.Equal(key, v.Key) {
-			deleteNode(s, v)
-			return true
-		}
+func (s *store) delete(key []byte) bool {
+	v, _, _ := s.lookup(key)
+	if v != nil {
+		deleteNode(s, v)
+		return true
 	}
 
 	return false
 }
 
-func (s *Store) Cost() uint64 {
-	return s.cost
+func (s *store) Delete(key []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.delete(key)
 }

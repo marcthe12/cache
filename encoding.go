@@ -7,38 +7,42 @@ import (
 	"time"
 )
 
-type Encoder struct {
-	*bufio.Writer
+type encoder struct {
+	w   *bufio.Writer
 	buf []byte
 }
 
-func NewEncoder(w io.Writer) *Encoder {
-	return &Encoder{
-		Writer: bufio.NewWriter(w),
-		buf:    make([]byte, 8),
+func newEncoder(w io.Writer) *encoder {
+	return &encoder{
+		w:   bufio.NewWriter(w),
+		buf: make([]byte, 8),
 	}
 }
 
-func (e *Encoder) EncodeUint64(val uint64) error {
+func (e *encoder) Flush() error {
+	return e.w.Flush()
+}
+
+func (e *encoder) EncodeUint64(val uint64) error {
 	binary.LittleEndian.PutUint64(e.buf, val)
-	_, err := e.Write(e.buf)
+	_, err := e.w.Write(e.buf)
 	return err
 }
 
-func (e *Encoder) EncodeTime(val time.Time) error {
+func (e *encoder) EncodeTime(val time.Time) error {
 	return e.EncodeUint64(uint64(val.Unix()))
 }
 
-func (e *Encoder) EncodeBytes(val []byte) error {
+func (e *encoder) EncodeBytes(val []byte) error {
 	if err := e.EncodeUint64(uint64(len(val))); err != nil {
 		return err
 	}
 
-	_, err := e.Write(val)
+	_, err := e.w.Write(val)
 	return err
 }
 
-func (e *Encoder) EncodeNode(n *Node) error {
+func (e *encoder) EncodeNode(n *node) error {
 	if err := e.EncodeUint64(n.Hash); err != nil {
 		return err
 	}
@@ -62,27 +66,27 @@ func (e *Encoder) EncodeNode(n *Node) error {
 	return nil
 }
 
-type Decoder struct {
-	*bufio.Reader
+type decoder struct {
+	r   *bufio.Reader
 	buf []byte
 }
 
-func NewDecoder(r io.Reader) *Decoder {
-	return &Decoder{
-		Reader: bufio.NewReader(r),
-		buf:    make([]byte, 8),
+func newDecoder(r io.Reader) *decoder {
+	return &decoder{
+		r:   bufio.NewReader(r),
+		buf: make([]byte, 8),
 	}
 }
 
-func (d *Decoder) DecodeUint64() (uint64, error) {
-	_, err := io.ReadFull(d, d.buf)
+func (d *decoder) DecodeUint64() (uint64, error) {
+	_, err := io.ReadFull(d.r, d.buf)
 	if err != nil {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(d.buf), nil
 }
 
-func (d *Decoder) DecodeTime() (time.Time, error) {
+func (d *decoder) DecodeTime() (time.Time, error) {
 	ts, err := d.DecodeUint64()
 	if err != nil {
 		return zero[time.Time](), err
@@ -90,18 +94,18 @@ func (d *Decoder) DecodeTime() (time.Time, error) {
 	return time.Unix(int64(ts), 0), nil
 }
 
-func (d *Decoder) DecodeBytes() ([]byte, error) {
+func (d *decoder) DecodeBytes() ([]byte, error) {
 	lenVal, err := d.DecodeUint64()
 	if err != nil {
 		return nil, err
 	}
 	data := make([]byte, lenVal)
-	_, err = io.ReadFull(d, data)
+	_, err = io.ReadFull(d.r, data)
 	return data, err
 }
 
-func (d *Decoder) DecodeNodes() (*Node, error) {
-	n := &Node{}
+func (d *decoder) DecodeNodes() (*node, error) {
+	n := &node{}
 
 	hash, err := d.DecodeUint64()
 	if err != nil {
@@ -133,63 +137,63 @@ func (d *Decoder) DecodeNodes() (*Node, error) {
 	return n, err
 }
 
-func (s *Store) Snapshot(w io.WriteSeeker) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *store) Snapshot(w io.WriteSeeker) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	w.Seek(0, io.SeekStart)
-	wr := NewEncoder(w)
+	wr := newEncoder(w)
 
-	wr.EncodeUint64(s.maxCost)
-	wr.EncodeUint64(uint64(s.strategy.Type))
-	wr.EncodeUint64(s.lenght)
+	wr.EncodeUint64(s.MaxCost)
+	wr.EncodeUint64(uint64(s.Policy.Type))
+	wr.EncodeUint64(s.Lenght)
 
-	for v := s.evict.EvictNext; v != &s.evict; v = v.EvictNext {
+	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
 		if err := wr.EncodeNode(v); err != nil {
 			return err
 		}
 	}
-	wr.Flush()
+	wr.w.Flush()
 	return nil
 }
 
-func (s *Store) LoadSnapshot(r io.ReadSeeker) error {
+func (s *store) LoadSnapshot(r io.ReadSeeker) error {
 	r.Seek(0, io.SeekStart)
-	rr := NewDecoder(r)
+	rr := newDecoder(r)
 
 	maxCost, err := rr.DecodeUint64()
 	if err != nil {
 		return err
 	}
-	s.maxCost = maxCost
+	s.MaxCost = maxCost
 
 	policy, err := rr.DecodeUint64()
 	if err != nil {
 		return err
 	}
-	s.strategy.SetPolicy(EvictionPolicyType(policy))
+	s.Policy.SetPolicy(EvictionPolicyType(policy))
 
 	lenght, err := rr.DecodeUint64()
 	if err != nil {
 		return err
 	}
-	s.lenght = lenght
+	s.Lenght = lenght
 
 	k := 128
-	for k < int(s.lenght) {
+	for k < int(s.Lenght) {
 		k = k << 1
 	}
 
-	s.bucket = make([]Node, k)
-	for range s.lenght {
+	s.Bucket = make([]node, k)
+	for range s.Lenght {
 		v, err := rr.DecodeNodes()
 		if err != nil {
 			return err
 		}
 
-		idx := v.Hash % uint64(len(s.bucket))
+		idx := v.Hash % uint64(len(s.Bucket))
 
-		bucket := &s.bucket[idx]
+		bucket := &s.Bucket[idx]
 		lazyInitBucket(bucket)
 
 		v.HashPrev = bucket
@@ -197,12 +201,12 @@ func (s *Store) LoadSnapshot(r io.ReadSeeker) error {
 		v.HashNext.HashPrev = v
 		v.HashPrev.HashNext = v
 
-		v.EvictPrev = &s.evict
+		v.EvictPrev = &s.Evict
 		v.EvictNext = v.EvictPrev.EvictNext
 		v.EvictNext.EvictPrev = v
 		v.EvictPrev.EvictNext = v
 
-		s.cost = s.cost + uint64(len(v.Key)) + uint64(len(v.Value))
+		s.Cost = s.Cost + uint64(len(v.Key)) + uint64(len(v.Value))
 	}
 	return nil
 }

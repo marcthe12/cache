@@ -10,124 +10,182 @@ import (
 	"github.com/vmihailenco/msgpack"
 )
 
-type DB[K any, V any] struct {
-	file           io.WriteSeeker
-	Store          Store
-	snapshotTicker *pauseTimer
-	cleanupTicker *pauseTimer
-	stop           chan struct{}
+type db struct {
+	File           io.WriteSeeker
+	Store          store
+	SnapshotTicker *pauseTimer
+	CleanupTicker  *pauseTimer
+	Stop           chan struct{}
 	wg             sync.WaitGroup
 }
 
-func OpenFile[K any, V any](filename string) (*DB[K, V], error) {
-	ret := OpenMem[K, V]()
-	file, err := os.OpenFile(filename, os.O_RDWR, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create(filename)
+type Option func(*db) error
+
+func openFile(filename string, options ...Option) (*db, error) {
+	ret, err := openMem(options...)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		return nil, err
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if fileInfo.Size() == 0 {
+		ret.File = file
+		ret.Flush()
+	} else {
+		err := ret.Store.LoadSnapshot(file)
 		if err != nil {
 			return nil, err
 		}
-		ret.file = file
-		ret.Flush()
-	} else if err == nil {
-		ret.Store.LoadSnapshot(file)
-		ret.file = file
-	} else {
-		return nil, err
+		ret.File = file
 	}
 
 	return ret, nil
 }
 
-func OpenMem[K any, V any]() *DB[K, V] {
-	ret := &DB[K, V]{
-		snapshotTicker: newPauseTimer(0),
+func openMem(options ...Option) (*db, error) {
+	ret := &db{
+		SnapshotTicker: newPauseTimerStopped(0),
+		CleanupTicker:  newPauseTimerStopped(10 * time.Second),
 	}
-	ret.snapshotTicker.Stop()
-	ret.Clear()
-	ret.Store.strategy.evict = &ret.Store.evict
-	ret.SetStratergy(StrategyNone)
-	return ret
+	ret.Store.Init()
+	ret.SetConfig(options...)
+	return ret, nil
 }
 
-func (d *DB[K, V]) Start() {
-	d.stop = make(chan struct{})
+func (d *db) Start() {
+	d.Stop = make(chan struct{})
 	d.wg.Add(1)
 	go d.backgroundWorker()
 }
 
-func (d *DB[K, V]) SetStratergy(e EvictionPolicyType) error {
-	return d.Store.strategy.SetPolicy(e)
+func (d *db) SetConfig(options ...Option) error {
+	for _, opt := range options {
+		if err := opt(d); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (d *DB[K, V]) SetMaxCost(e EvictionPolicyType) {
-	d.Store.maxCost = d.Store.maxCost
+func WithPolicy(e EvictionPolicyType) Option {
+	return func(d *db) error {
+		return d.Store.Policy.SetPolicy(e)
+	}
 }
 
-func (d *DB[K, V]) SetSnapshotTime(t time.Duration) {
-	d.snapshotTicker.Reset(t)
+func WithMaxCost(maxCost uint64) Option {
+	return func(d *db) error {
+		d.Store.MaxCost = maxCost
+		return nil
+	}
 }
 
-func (d *DB[K, V]) backgroundWorker() {
+func SetSnapshotTime(t time.Duration) Option {
+	return func(d *db) error {
+		d.SnapshotTicker.Reset(t)
+		return nil
+	}
+}
+
+func SetCleanupTime(t time.Duration) Option {
+	return func(d *db) error {
+		d.CleanupTicker.Reset(t)
+		return nil
+	}
+}
+
+func (d *db) backgroundWorker() {
 	defer d.wg.Done()
 
-	d.snapshotTicker.Resume()
-	defer d.snapshotTicker.Stop()
+	d.SnapshotTicker.Resume()
+	defer d.SnapshotTicker.Stop()
+
+	d.CleanupTicker.Resume()
+	defer d.CleanupTicker.Stop()
 
 	for {
 		select {
-		case <-d.stop:
+		case <-d.Stop:
 			return
-		case <-d.snapshotTicker.C:
+		case <-d.SnapshotTicker.C:
 			d.Flush()
-		case <-d.snapshotTicker.C:
-			d.Flush()
+		case <-d.CleanupTicker.C:
+			cleanup(&d.Store)
+			evict(&d.Store)
 		}
 	}
 }
 
-func (d *DB[K, V]) Close() {
-	close(d.stop)
+func (d *db) Close() {
+	close(d.Stop)
 	d.wg.Wait()
 	d.Flush()
 	d.Clear()
-	if d.file != nil {
-		closer, ok := d.file.(io.Closer)
+	if d.File != nil {
+		closer, ok := d.File.(io.Closer)
 		if ok {
 			closer.Close()
 		}
 	}
 }
 
-func (d *DB[K, V]) Flush() error {
-	if d.file != nil {
-		return d.Store.Snapshot(d.file)
+func (d *db) Flush() error {
+	if d.File != nil {
+		return d.Store.Snapshot(d.File)
 	}
 	return nil
 }
 
-func (d *DB[K, V]) Clear() {
+func (d *db) Clear() {
 	d.Store.Clear()
 }
 
 var ErrKeyNotFound = errors.New("key not found")
 
-func (h *DB[K, V]) Get(key K) (V, time.Duration, error) {
+// The Cache database. Can be initialized by either OpenFile or OpenMem. Uses per DB Locks.
+type DB[K any, V any] struct {
+	*db
+}
+
+func OpenFile[K any, V any](filename string, options ...Option) (DB[K, V], error) {
+	ret, err := openFile(filename, options...)
+	if err != nil {
+		return zero[DB[K, V]](), err
+	}
+	ret.Start()
+	return DB[K, V]{db: ret}, nil
+}
+
+func OpenMem[K any, V any](filename string, options ...Option) (DB[K, V], error) {
+	ret, err := openMem(options...)
+	if err != nil {
+		return zero[DB[K, V]](), err
+	}
+	ret.Start()
+	return DB[K, V]{db: ret}, nil
+}
+
+func (h *DB[K, V]) Get(key K, value V) (V, time.Duration, error) {
 	keyData, err := msgpack.Marshal(key)
 	if err != nil {
-		return zero[V](), 0, err
+		return value, 0, err
 	}
 
 	v, ttl, ok := h.Store.Get(keyData)
 	if !ok {
-		return zero[V](), 0, ErrKeyNotFound
+		return value, 0, ErrKeyNotFound
 	}
 
-	var ret V
-	if err = msgpack.Unmarshal(v, &ret); err != nil {
-		return zero[V](), 0, err
+	if err = msgpack.Unmarshal(v, value); err != nil {
+		return value, 0, err
 	}
-	return ret, ttl, err
+	return value, ttl, err
 }
 
 func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
