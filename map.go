@@ -32,7 +32,7 @@ func (n *node) TTL() time.Duration {
 
 type store struct {
 	Bucket  []node
-	Lenght  uint64
+	Length  uint64
 	Cost    uint64
 	Evict   node
 	MaxCost uint64
@@ -51,7 +51,7 @@ func (s *store) Clear() {
 	defer s.mu.Unlock()
 
 	s.Bucket = make([]node, 8)
-	s.Lenght = 0
+	s.Length = 0
 	s.Cost = 0
 
 	s.Evict.EvictNext = &s.Evict
@@ -157,7 +157,7 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	}
 
 	bucket := &s.Bucket[idx]
-	if float64(s.Lenght)/float64(len(s.Bucket)) > 0.75 {
+	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
 		resize(s)
 		//resize may invidate pointer to bucket
 		bucket = &s.Bucket[idx]
@@ -182,7 +182,7 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	s.Policy.OnInsert(node)
 
 	s.Cost = s.Cost + uint64(len(key)) + uint64(len(value))
-	s.Lenght = s.Lenght + 1
+	s.Length = s.Length + 1
 }
 
 func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
@@ -204,7 +204,7 @@ func deleteNode(s *store, v *node) {
 	v.EvictPrev = nil
 
 	s.Cost = s.Cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
-	s.Lenght = s.Lenght - 1
+	s.Length = s.Length - 1
 }
 
 func (s *store) delete(key []byte) bool {

@@ -66,6 +66,27 @@ func (e *encoder) EncodeNode(n *node) error {
 	return nil
 }
 
+func (e *encoder) EncodeStore(s *store) error {
+	if err := e.EncodeUint64(s.MaxCost); err != nil {
+		return err
+	}
+
+	if err := e.EncodeUint64(uint64(s.Policy.Type)); err != nil {
+		return err
+	}
+
+	if err := e.EncodeUint64(s.Length); err != nil {
+		return err
+	}
+
+	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
+		if err := e.EncodeNode(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type decoder struct {
 	r   *bufio.Reader
 	buf []byte
@@ -137,56 +158,33 @@ func (d *decoder) DecodeNodes() (*node, error) {
 	return n, err
 }
 
-func (s *store) Snapshot(w io.WriteSeeker) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	w.Seek(0, io.SeekStart)
-	wr := newEncoder(w)
-
-	wr.EncodeUint64(s.MaxCost)
-	wr.EncodeUint64(uint64(s.Policy.Type))
-	wr.EncodeUint64(s.Lenght)
-
-	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
-		if err := wr.EncodeNode(v); err != nil {
-			return err
-		}
-	}
-	wr.w.Flush()
-	return nil
-}
-
-func (s *store) LoadSnapshot(r io.ReadSeeker) error {
-	r.Seek(0, io.SeekStart)
-	rr := newDecoder(r)
-
-	maxCost, err := rr.DecodeUint64()
+func (d *decoder) DecodeStore(s *store) error {
+	maxCost, err := d.DecodeUint64()
 	if err != nil {
 		return err
 	}
 	s.MaxCost = maxCost
 
-	policy, err := rr.DecodeUint64()
+	policy, err := d.DecodeUint64()
 	if err != nil {
 		return err
 	}
 	s.Policy.SetPolicy(EvictionPolicyType(policy))
 
-	lenght, err := rr.DecodeUint64()
+	length, err := d.DecodeUint64()
 	if err != nil {
 		return err
 	}
-	s.Lenght = lenght
+	s.Length = length
 
 	k := 128
-	for k < int(s.Lenght) {
+	for k < int(s.Length) {
 		k = k << 1
 	}
 
 	s.Bucket = make([]node, k)
-	for range s.Lenght {
-		v, err := rr.DecodeNodes()
+	for range s.Length {
+		v, err := d.DecodeNodes()
 		if err != nil {
 			return err
 		}
@@ -201,12 +199,35 @@ func (s *store) LoadSnapshot(r io.ReadSeeker) error {
 		v.HashNext.HashPrev = v
 		v.HashPrev.HashNext = v
 
-		v.EvictPrev = &s.Evict
-		v.EvictNext = v.EvictPrev.EvictNext
+		v.EvictNext = &s.Evict
+		v.EvictPrev = v.EvictNext.EvictPrev
 		v.EvictNext.EvictPrev = v
 		v.EvictPrev.EvictNext = v
 
 		s.Cost = s.Cost + uint64(len(v.Key)) + uint64(len(v.Value))
 	}
 	return nil
+}
+
+func (s *store) Snapshot(w io.WriteSeeker) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := w.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	wr := newEncoder(w)
+	defer wr.Flush()
+
+	return wr.EncodeStore(s)
+}
+
+func (s *store) LoadSnapshot(r io.ReadSeeker) error {
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	d := newDecoder(r)
+
+	return d.DecodeStore(s)
 }

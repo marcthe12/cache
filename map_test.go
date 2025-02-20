@@ -95,22 +95,20 @@ func BenchmarkStoreGet(b *testing.B) {
 
 	key := []byte("Key")
 	store.Set(key, []byte("Store"), 0)
-	b.SetBytes(1)
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			store.Get(key)
-		}
-	})
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		store.Get(key)
+	}
 }
 
 func BenchmarkStoreSet(b *testing.B) {
 	store := setupTestStore(b)
 
 	key := []byte("Key")
-	b.SetBytes(1)
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			store.Set(key, []byte("Store"), 0)
-		}
-	})
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		store.Set(key, []byte("Store"), 0)
+	}
 }

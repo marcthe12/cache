@@ -188,6 +188,10 @@ func (h *DB[K, V]) Get(key K, value V) (V, time.Duration, error) {
 	return value, ttl, err
 }
 
+func (h *DB[K, V]) GetValue(key K) (V, time.Duration, error) {
+	return h.Get(key, zero[V]())
+}
+
 func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
 	keyData, err := msgpack.Marshal(key)
 	if err != nil {
