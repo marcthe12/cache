@@ -2,6 +2,7 @@ package cache
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -29,44 +30,13 @@ func getListOrder(t testing.TB, evict *node) []*node {
 	return order
 }
 
-func TestNonePolicy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("OnInsert", func(t *testing.T) {
-		t.Parallel()
-
-		policy := nonePolicy{evict: createSentinel(t)}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Contains(t, order, n0)
-		assert.Contains(t, order, n1)
-	})
-
-	t.Run("Evict", func(t *testing.T) {
-		t.Parallel()
-
-		policy := nonePolicy{evict: createSentinel(t)}
-
-		policy.OnInsert(&node{})
-
-		assert.Nil(t, policy.Evict())
-	})
-}
-
 func TestFIFOPolicy(t *testing.T) {
 	t.Parallel()
 
 	t.Run("OnInsert", func(t *testing.T) {
 		t.Parallel()
 
-		policy := fifoPolicy{evict: createSentinel(t)}
+		policy := fifoPolicy{evict: createSentinel(t), shouldEvict: true}
 
 		n0 := &node{Key: []byte("0")}
 		n1 := &node{Key: []byte("1")}
@@ -86,7 +56,7 @@ func TestFIFOPolicy(t *testing.T) {
 		t.Run("Evict", func(t *testing.T) {
 			t.Parallel()
 
-			policy := fifoPolicy{evict: createSentinel(t)}
+			policy := fifoPolicy{evict: createSentinel(t), shouldEvict: true}
 
 			n0 := &node{Key: []byte("0")}
 			n1 := &node{Key: []byte("1")}
@@ -97,6 +67,17 @@ func TestFIFOPolicy(t *testing.T) {
 			evictedNode := policy.Evict()
 			assert.Same(t, n0, evictedNode)
 		})
+
+		t.Run("Evict noEvict", func(t *testing.T) {
+			t.Parallel()
+
+			policy := fifoPolicy{evict: createSentinel(t), shouldEvict: false}
+
+			policy.OnInsert(&node{})
+
+			assert.Nil(t, policy.Evict())
+		})
+
 		t.Run("Empty List", func(t *testing.T) {
 			t.Parallel()
 
@@ -269,7 +250,7 @@ func TestLFUPolicy(t *testing.T) {
 
 			policy := lfuPolicy{evict: createSentinel(t)}
 
-			n0 := &node{Key: []byte("1")}
+			n0 := &node{Key: []byte("0")}
 			n1 := &node{Key: []byte("1")}
 
 			policy.OnInsert(n0)
@@ -288,6 +269,170 @@ func TestLFUPolicy(t *testing.T) {
 			t.Parallel()
 
 			policy := lfuPolicy{evict: createSentinel(t)}
+
+			assert.Nil(t, policy.Evict())
+		})
+	})
+}
+
+func TestLTRPolicy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("OnInsert", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("With TTL", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			order := getListOrder(t, policy.evict)
+			assert.Len(t, order, 2)
+			assert.Same(t, n0, order[0])
+			assert.Same(t, n1, order[1])
+		})
+
+		t.Run("Without TTL", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0")}
+			n1 := &node{Key: []byte("1")}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			order := getListOrder(t, policy.evict)
+			assert.Len(t, order, 2)
+			assert.Same(t, n1, order[0])
+			assert.Same(t, n0, order[1])
+		})
+	})
+
+	t.Run("OnUpdate", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("With TTL", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			n0.Expiration = time.Now().Add(3 * time.Hour)
+			policy.OnUpdate(n0)
+
+			order := getListOrder(t, policy.evict)
+			assert.Len(t, order, 2)
+			assert.Same(t, n0, order[1])
+			assert.Same(t, n1, order[0])
+		})
+
+		t.Run("With TTL Decrease", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			n1.Expiration = time.Now().Add(30 * time.Minute)
+			policy.OnUpdate(n1)
+
+			order := getListOrder(t, policy.evict)
+			assert.Len(t, order, 2)
+			assert.Same(t, n1, order[1])
+			assert.Same(t, n0, order[0])
+		})
+	})
+
+	t.Run("Evict", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("Evict", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0")}
+			n1 := &node{Key: []byte("1")}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			evictedNode := policy.Evict()
+			assert.Same(t, n0, evictedNode)
+		})
+
+		t.Run("Evict TTL", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			evictedNode := policy.Evict()
+			assert.Same(t, n1, evictedNode)
+		})
+
+		t.Run("Evict TTL Update", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			n0.Expiration = time.Now().Add(3 * time.Hour)
+			policy.OnUpdate(n0)
+
+			evictedNode := policy.Evict()
+			assert.Same(t, n0, evictedNode)
+		})
+
+		t.Run("Evict TTL Update Down", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
+
+			n0 := &node{Key: []byte("0"), Expiration: time.Now().Add(1 * time.Hour)}
+			n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(2 * time.Hour)}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			n1.Expiration = time.Now().Add(20 * time.Minute)
+			policy.OnUpdate(n1)
+
+			evictedNode := policy.Evict()
+			assert.Same(t, n1, evictedNode)
+		})
+
+		t.Run("Empty List", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
 
 			assert.Nil(t, policy.Evict())
 		})

@@ -7,16 +7,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vmihailenco/msgpack"
+	"github.com/rogpeppe/go-internal/lockedfile"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type db struct {
-	File           io.WriteSeeker
-	Store          store
-	SnapshotTicker *pauseTimer
-	CleanupTicker  *pauseTimer
-	Stop           chan struct{}
-	wg             sync.WaitGroup
+	File  io.WriteSeeker
+	Store store
+	Stop  chan struct{}
+	wg    sync.WaitGroup
 }
 
 type Option func(*db) error
@@ -26,7 +25,7 @@ func openFile(filename string, options ...Option) (*db, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
+	file, err := lockedfile.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return nil, err
 	}
@@ -49,10 +48,7 @@ func openFile(filename string, options ...Option) (*db, error) {
 }
 
 func openMem(options ...Option) (*db, error) {
-	ret := &db{
-		SnapshotTicker: newPauseTimerStopped(0),
-		CleanupTicker:  newPauseTimerStopped(10 * time.Second),
-	}
+	ret := &db{}
 	ret.Store.Init()
 	ret.SetConfig(options...)
 	return ret, nil
@@ -65,6 +61,9 @@ func (d *db) Start() {
 }
 
 func (d *db) SetConfig(options ...Option) error {
+	d.Store.mu.Lock()
+	defer d.Store.mu.Unlock()
+
 	for _, opt := range options {
 		if err := opt(d); err != nil {
 			return err
@@ -88,14 +87,14 @@ func WithMaxCost(maxCost uint64) Option {
 
 func SetSnapshotTime(t time.Duration) Option {
 	return func(d *db) error {
-		d.SnapshotTicker.Reset(t)
+		d.Store.SnapshotTicker.Reset(t)
 		return nil
 	}
 }
 
 func SetCleanupTime(t time.Duration) Option {
 	return func(d *db) error {
-		d.CleanupTicker.Reset(t)
+		d.Store.CleanupTicker.Reset(t)
 		return nil
 	}
 }
@@ -103,19 +102,19 @@ func SetCleanupTime(t time.Duration) Option {
 func (d *db) backgroundWorker() {
 	defer d.wg.Done()
 
-	d.SnapshotTicker.Resume()
-	defer d.SnapshotTicker.Stop()
+	d.Store.SnapshotTicker.Resume()
+	defer d.Store.SnapshotTicker.Stop()
 
-	d.CleanupTicker.Resume()
-	defer d.CleanupTicker.Stop()
+	d.Store.CleanupTicker.Resume()
+	defer d.Store.CleanupTicker.Stop()
 
 	for {
 		select {
 		case <-d.Stop:
 			return
-		case <-d.SnapshotTicker.C:
+		case <-d.Store.SnapshotTicker.C:
 			d.Flush()
-		case <-d.CleanupTicker.C:
+		case <-d.Store.CleanupTicker.C:
 			cleanup(&d.Store)
 			evict(&d.Store)
 		}

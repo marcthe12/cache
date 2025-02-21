@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"sync"
 	"time"
+
+	"github.com/marcthe12/cache/internal/pausedtimer"
 )
+
+const initialBucketSize uint64 = 8
 
 type node struct {
 	Hash       uint64
@@ -31,18 +35,22 @@ func (n *node) TTL() time.Duration {
 }
 
 type store struct {
-	Bucket  []node
-	Length  uint64
-	Cost    uint64
-	Evict   node
-	MaxCost uint64
-	Policy  evictionPolicy
-	mu      sync.Mutex
+	Bucket         []node
+	Length         uint64
+	Cost           uint64
+	Evict          node
+	MaxCost        uint64
+	SnapshotTicker *pausedtimer.PauseTimer
+	CleanupTicker  *pausedtimer.PauseTimer
+	Policy         evictionPolicy
+	mu             sync.Mutex
 }
 
 func (s *store) Init() {
 	s.Clear()
 	s.Policy.evict = &s.Evict
+	s.SnapshotTicker = pausedtimer.NewStopped(0)
+	s.CleanupTicker = pausedtimer.NewStopped(10 * time.Second)
 	s.Policy.SetPolicy(PolicyNone)
 }
 
@@ -50,7 +58,7 @@ func (s *store) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.Bucket = make([]node, 8)
+	s.Bucket = make([]node, initialBucketSize)
 	s.Length = 0
 	s.Cost = 0
 
@@ -112,6 +120,7 @@ func resize(s *store) {
 
 	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
 		if !v.IsValid() {
+			deleteNode(s, v)
 			continue
 		}
 		idx := v.Hash % uint64(len(bucket))
@@ -153,13 +162,14 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 		s.Cost = s.Cost + uint64(len(value)) - uint64(len(v.Value))
 		v.Value = value
 		v.Expiration = time.Now().Add(ttl)
-		s.Policy.OnAccess(v)
+		s.Policy.OnUpdate(v)
 	}
 
 	bucket := &s.Bucket[idx]
 	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
 		resize(s)
 		//resize may invidate pointer to bucket
+		_, idx, _ := s.lookup(key)
 		bucket = &s.Bucket[idx]
 		lazyInitBucket(bucket)
 	}

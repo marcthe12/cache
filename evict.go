@@ -1,6 +1,8 @@
 package cache
 
-import "errors"
+import (
+	"errors"
+)
 
 // EvictionPolicyType defines the type of eviction policy.
 type EvictionPolicyType int
@@ -16,6 +18,7 @@ const (
 // evictionStrategies interface defines the methods for eviction strategies.
 type evictionStrategies interface {
 	OnInsert(n *node)
+	OnUpdate(n *node)
 	OnAccess(n *node)
 	Evict() *node
 }
@@ -27,20 +30,30 @@ type evictionPolicy struct {
 	evict *node
 }
 
+func pushEvict(node *node, sentinnel *node) {
+	node.EvictPrev = sentinnel
+	node.EvictNext = node.EvictPrev.EvictNext
+	node.EvictNext.EvictPrev = node
+	node.EvictPrev.EvictNext = node
+}
+
 // SetPolicy sets the eviction policy based on the given type.
 func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 	store := map[EvictionPolicyType]func() evictionStrategies{
 		PolicyNone: func() evictionStrategies {
-			return nonePolicy{evict: e.evict}
+			return fifoPolicy{evict: e.evict, shouldEvict: false}
 		},
 		PolicyFIFO: func() evictionStrategies {
-			return fifoPolicy{evict: e.evict}
+			return fifoPolicy{evict: e.evict, shouldEvict: true}
 		},
 		PolicyLRU: func() evictionStrategies {
 			return lruPolicy{evict: e.evict}
 		},
 		PolicyLFU: func() evictionStrategies {
 			return lfuPolicy{evict: e.evict}
+		},
+		PolicyLTR: func() evictionStrategies {
+			return ltrPolicy{evict: e.evict}
 		},
 	}
 	factory, ok := store[y]
@@ -51,48 +64,28 @@ func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 	return nil
 }
 
-// nonePolicy struct represents the no eviction policy.
-type nonePolicy struct {
-	evict *node
-}
-
-// OnInsert adds a node to the eviction list.
-func (s nonePolicy) OnInsert(node *node) {
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
-}
-
-// OnAccess is a no-op for nonePolicy.
-func (nonePolicy) OnAccess(n *node) {
-}
-
-// Evict returns nil for nonePolicy.
-func (nonePolicy) Evict() *node {
-	return nil
-}
-
 // fifoPolicy struct represents the First-In-First-Out eviction policy.
 type fifoPolicy struct {
-	evict *node
+	evict       *node
+	shouldEvict bool
 }
 
 // OnInsert adds a node to the eviction list.
 func (s fifoPolicy) OnInsert(node *node) {
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
+	pushEvict(node, s.evict)
 }
 
 // OnAccess is a no-op for fifoPolicy.
 func (fifoPolicy) OnAccess(n *node) {
 }
 
+// OnUpdate is a no-op for fifoPolicy.
+func (fifoPolicy) OnUpdate(n *node) {
+}
+
 // Evict returns the oldest node for fifoPolicy.
 func (s fifoPolicy) Evict() *node {
-	if s.evict.EvictPrev != s.evict {
+	if s.shouldEvict && s.evict.EvictPrev != s.evict {
 		return s.evict.EvictPrev
 	} else {
 		return nil
@@ -106,21 +99,18 @@ type lruPolicy struct {
 
 // OnInsert adds a node to the eviction list.
 func (s lruPolicy) OnInsert(node *node) {
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
+	pushEvict(node, s.evict)
+}
+
+func (s lruPolicy) OnUpdate(node *node) {
+	s.OnAccess(node)
 }
 
 // OnAccess moves the accessed node to the front of the eviction list.
 func (s lruPolicy) OnAccess(node *node) {
 	node.EvictNext.EvictPrev = node.EvictPrev
 	node.EvictPrev.EvictNext = node.EvictNext
-
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
+	s.OnInsert(node)
 }
 
 // Evict returns the least recently used node for lruPolicy.
@@ -139,11 +129,12 @@ type lfuPolicy struct {
 
 // OnInsert adds a node to the eviction list and initializes its access count.
 func (s lfuPolicy) OnInsert(node *node) {
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
-	node.Access = 0
+	pushEvict(node, s.evict)
+}
+
+// OnUpdate increments the access count of the node and reorders the list.
+func (s lfuPolicy) OnUpdate(node *node) {
+	s.OnAccess(node)
 }
 
 // OnAccess increments the access count of the node and reorders the list.
@@ -178,4 +169,70 @@ func (s lfuPolicy) Evict() *node {
 	} else {
 		return nil
 	}
+}
+
+// ltrPolicy struct represents the Least Remaining Time eviction policy.
+type ltrPolicy struct {
+	evict     *node
+	evictZero bool
+}
+
+// OnInsert adds a node to the eviction list based on its TTL (Time To Live).
+// It places the node in the correct position in the list based on TTL.
+func (s ltrPolicy) OnInsert(node *node) {
+	pushEvict(node, s.evict)
+
+	s.OnUpdate(node)
+}
+
+// OnAccess is a no-op for ltrPolicy.
+// It does not perform any action when a node is accessed.
+func (s ltrPolicy) OnAccess(node *node) {
+}
+
+// OnUpdate updates the position of the node in the eviction list based on its TTL.
+// It reorders the list to maintain the correct order based on TTL.
+func (s ltrPolicy) OnUpdate(node *node) {
+	if node.TTL() == 0 {
+		return
+	}
+	for v := node.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
+		if v.TTL() == 0 {
+			continue
+		}
+		if v.TTL() < node.TTL() {
+			node.EvictNext.EvictPrev = node.EvictPrev
+			node.EvictPrev.EvictNext = node.EvictNext
+
+			node.EvictPrev = v
+			node.EvictNext = node.EvictPrev.EvictNext
+			node.EvictNext.EvictPrev = node
+			node.EvictPrev.EvictNext = node
+			return
+		}
+	}
+	for v := node.EvictNext; v.EvictNext != s.evict; v = v.EvictNext {
+		if v.TTL() == 0 {
+			continue
+		}
+		if v.TTL() > node.TTL() {
+			node.EvictNext.EvictPrev = node.EvictPrev
+			node.EvictPrev.EvictNext = node.EvictNext
+
+			node.EvictPrev = v
+			node.EvictNext = node.EvictPrev.EvictNext
+			node.EvictNext.EvictPrev = node
+			node.EvictPrev.EvictNext = node
+			return
+		}
+	}
+}
+
+// Evict returns the node with the least remaining time to live for ltrPolicy.
+// It returns the node at the end of the eviction list.
+func (s ltrPolicy) Evict() *node {
+	if s.evict.EvictPrev != s.evict && (s.evict.EvictPrev.TTL() != 0 || s.evictZero) {
+		return s.evict.EvictPrev
+	}
+	return nil
 }

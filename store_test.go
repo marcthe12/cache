@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -23,10 +25,24 @@ func TestStoreGetSet(t *testing.T) {
 		store := setupTestStore(t)
 
 		want := []byte("Value")
-		store.Set([]byte("Key"), want, 0)
-		got, _, ok := store.Get([]byte("Key"))
+		store.Set([]byte("Key"), want, 1*time.Hour)
+		got, ttl, ok := store.Get([]byte("Key"))
 		assert.Equal(t, want, got)
+
+		now := time.Now()
+		assert.WithinDuration(t, now.Add(ttl), now.Add(1*time.Hour), 1*time.Millisecond)
 		assert.True(t, ok)
+	})
+
+	t.Run("Exists TTL", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestStore(t)
+
+		want := []byte("Value")
+		store.Set([]byte("Key"), want, time.Nanosecond)
+		_, _, ok := store.Get([]byte("Key"))
+		assert.False(t, ok)
 	})
 
 	t.Run("Not Exists", func(t *testing.T) {
@@ -49,6 +65,31 @@ func TestStoreGetSet(t *testing.T) {
 		got, _, ok := store.Get([]byte("Key"))
 		assert.Equal(t, want, got)
 		assert.True(t, ok)
+	})
+
+	t.Run("Resize", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestStore(t)
+
+		for i := range initialBucketSize {
+			key := binary.LittleEndian.AppendUint64(nil, i)
+			store.Set(key, key, 0)
+		}
+
+		for i := range store.Length {
+			key := binary.LittleEndian.AppendUint64(nil, i)
+			_, _, ok := store.Get(key)
+			assert.True(t, ok, i)
+		}
+
+		assert.Len(t, store.Bucket, int(initialBucketSize)*2)
+
+		for i := range store.Length {
+			key := binary.LittleEndian.AppendUint64(nil, i)
+			_, _, ok := store.Get(key)
+			assert.True(t, ok, i)
+		}
 	})
 }
 
