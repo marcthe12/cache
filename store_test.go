@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -132,24 +133,63 @@ func TestStoreClear(t *testing.T) {
 }
 
 func BenchmarkStoreGet(b *testing.B) {
-	store := setupTestStore(b)
+	for n := 1; n <= 10000; n *= 10 {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			want := setupTestStore(b)
+			for i := range n - 1 {
+				buf := make([]byte, 8)
+				binary.LittleEndian.PutUint64(buf, uint64(i))
+				want.Set(buf, buf, 0)
+			}
+			key := []byte("Key")
+			want.Set(key, []byte("Store"), 0)
+			b.ReportAllocs()
 
-	key := []byte("Key")
-	store.Set(key, []byte("Store"), 0)
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		store.Get(key)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				want.Get(key)
+			}
+		})
 	}
 }
 
 func BenchmarkStoreSet(b *testing.B) {
-	store := setupTestStore(b)
+	for n := 1; n <= 10000; n *= 10 {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			want := setupTestStore(b)
+			for i := range n - 1 {
+				buf := make([]byte, 8)
+				binary.LittleEndian.PutUint64(buf, uint64(i))
+				want.Set(buf, buf, 0)
+			}
+			key := []byte("Key")
+			store := []byte("Store")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				want.Set(key, store, 0)
+			}
+		})
+	}
+}
 
-	key := []byte("Key")
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		store.Set(key, []byte("Store"), 0)
+func BenchmarkStoreDelete(b *testing.B) {
+	for n := 1; n <= 10000; n *= 10 {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			want := setupTestStore(b)
+			for i := range n - 1 {
+				buf := make([]byte, 8)
+				binary.LittleEndian.PutUint64(buf, uint64(i))
+				want.Set(buf, buf, 0)
+			}
+			key := []byte("Key")
+			store := []byte("Store")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				want.Set(key, store, 0)
+				want.Delete(key)
+			}
+		})
 	}
 }

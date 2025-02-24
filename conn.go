@@ -11,6 +11,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+ // db represents a cache database with file-backed storage and in-memory operation.
 type db struct {
 	File  io.WriteSeeker
 	Store store
@@ -18,8 +19,10 @@ type db struct {
 	wg    sync.WaitGroup
 }
 
+ // Option is a function type for configuring the db.
 type Option func(*db) error
 
+ // openFile opens a file-backed cache database with the given options.
 func openFile(filename string, options ...Option) (*db, error) {
 	ret, err := openMem(options...)
 	if err != nil {
@@ -47,6 +50,7 @@ func openFile(filename string, options ...Option) (*db, error) {
 	return ret, nil
 }
 
+ // openMem initializes an in-memory cache database with the given options.
 func openMem(options ...Option) (*db, error) {
 	ret := &db{}
 	ret.Store.Init()
@@ -54,12 +58,14 @@ func openMem(options ...Option) (*db, error) {
 	return ret, nil
 }
 
+ // Start begins the background worker for periodic tasks.
 func (d *db) Start() {
 	d.Stop = make(chan struct{})
 	d.wg.Add(1)
 	go d.backgroundWorker()
 }
 
+ // SetConfig applies configuration options to the db.
 func (d *db) SetConfig(options ...Option) error {
 	d.Store.mu.Lock()
 	defer d.Store.mu.Unlock()
@@ -72,12 +78,14 @@ func (d *db) SetConfig(options ...Option) error {
 	return nil
 }
 
+ // WithPolicy sets the eviction policy for the cache.
 func WithPolicy(e EvictionPolicyType) Option {
 	return func(d *db) error {
 		return d.Store.Policy.SetPolicy(e)
 	}
 }
 
+ // WithMaxCost sets the maximum cost for the cache.
 func WithMaxCost(maxCost uint64) Option {
 	return func(d *db) error {
 		d.Store.MaxCost = maxCost
@@ -85,6 +93,7 @@ func WithMaxCost(maxCost uint64) Option {
 	}
 }
 
+ // SetSnapshotTime sets the interval for taking snapshots of the cache.
 func SetSnapshotTime(t time.Duration) Option {
 	return func(d *db) error {
 		d.Store.SnapshotTicker.Reset(t)
@@ -92,6 +101,7 @@ func SetSnapshotTime(t time.Duration) Option {
 	}
 }
 
+ // SetCleanupTime sets the interval for cleaning up expired entries.
 func SetCleanupTime(t time.Duration) Option {
 	return func(d *db) error {
 		d.Store.CleanupTicker.Reset(t)
@@ -99,6 +109,7 @@ func SetCleanupTime(t time.Duration) Option {
 	}
 }
 
+ // backgroundWorker performs periodic tasks such as snapshotting and cleanup.
 func (d *db) backgroundWorker() {
 	defer d.wg.Done()
 
@@ -121,6 +132,7 @@ func (d *db) backgroundWorker() {
 	}
 }
 
+ // Close stops the background worker and cleans up resources.
 func (d *db) Close() {
 	close(d.Stop)
 	d.wg.Wait()
@@ -134,6 +146,7 @@ func (d *db) Close() {
 	}
 }
 
+ // Flush writes the current state of the store to the file.
 func (d *db) Flush() error {
 	if d.File != nil {
 		return d.Store.Snapshot(d.File)
@@ -141,17 +154,20 @@ func (d *db) Flush() error {
 	return nil
 }
 
+ // Clear removes all entries from the in-memory store.
 func (d *db) Clear() {
 	d.Store.Clear()
 }
 
-var ErrKeyNotFound = errors.New("key not found")
+var ErrKeyNotFound = errors.New("key not found") // ErrKeyNotFound is returned when a key is not found in the cache.
 
 // The Cache database. Can be initialized by either OpenFile or OpenMem. Uses per DB Locks.
+ // DB represents a generic cache database with key-value pairs.
 type DB[K any, V any] struct {
 	*db
 }
 
+ // OpenFile opens a file-backed cache database with the specified options.
 func OpenFile[K any, V any](filename string, options ...Option) (DB[K, V], error) {
 	ret, err := openFile(filename, options...)
 	if err != nil {
@@ -161,7 +177,8 @@ func OpenFile[K any, V any](filename string, options ...Option) (DB[K, V], error
 	return DB[K, V]{db: ret}, nil
 }
 
-func OpenMem[K any, V any](filename string, options ...Option) (DB[K, V], error) {
+ // OpenMem initializes an in-memory cache database with the specified options.
+func OpenMem[K any, V any](options ...Option) (DB[K, V], error) {
 	ret, err := openMem(options...)
 	if err != nil {
 		return zero[DB[K, V]](), err
@@ -170,33 +187,49 @@ func OpenMem[K any, V any](filename string, options ...Option) (DB[K, V], error)
 	return DB[K, V]{db: ret}, nil
 }
 
-func (h *DB[K, V]) Get(key K, value V) (V, time.Duration, error) {
-	keyData, err := msgpack.Marshal(key)
+ // marshal serializes a value using msgpack.
+func marshal[T any](v T) ([]byte, error) {
+	return msgpack.Marshal(v)
+}
+
+ // unmarshal deserializes data into a value using msgpack.
+func unmarshal[T any](data []byte, v *T) error {
+	return msgpack.Unmarshal(data, v)
+}
+
+ // Get retrieves a value from the cache by key and returns its TTL.
+func (h *DB[K, V]) Get(key K, value *V) (time.Duration, error) {
+	keyData, err := marshal(key)
 	if err != nil {
-		return value, 0, err
+		return 0, err
 	}
 
 	v, ttl, ok := h.Store.Get(keyData)
 	if !ok {
-		return value, 0, ErrKeyNotFound
+		return 0, ErrKeyNotFound
 	}
+	if v != nil {
+		if err = unmarshal(v, value); err != nil {
+			return 0, err
+		}
+	}
+	return ttl, err
+}
 
-	if err = msgpack.Unmarshal(v, value); err != nil {
-		return value, 0, err
-	}
+ // GetValue retrieves a value from the cache by key and returns the value and its TTL.
+func (h *DB[K, V]) GetValue(key K) (V, time.Duration, error) {
+	value := zero[V]()
+	ttl, err := h.Get(key, &value)
 	return value, ttl, err
 }
 
-func (h *DB[K, V]) GetValue(key K) (V, time.Duration, error) {
-	return h.Get(key, zero[V]())
-}
-
+ // Set adds a key-value pair to the cache with a specified TTL.
 func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
-	keyData, err := msgpack.Marshal(key)
+	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}
-	valueData, err := msgpack.Marshal(value)
+	valueData, err := marshal(value)
 	if err != nil {
 		return err
 	}
@@ -204,8 +237,9 @@ func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
 	return nil
 }
 
+ // Delete removes a key-value pair from the cache.
 func (h *DB[K, V]) Delete(key K) error {
-	keyData, err := msgpack.Marshal(key)
+	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}

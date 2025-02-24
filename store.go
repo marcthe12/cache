@@ -10,6 +10,7 @@ import (
 
 const initialBucketSize uint64 = 8
 
+ // node represents an entry in the cache with metadata for eviction and expiration.
 type node struct {
 	Hash       uint64
 	Expiration time.Time
@@ -22,10 +23,12 @@ type node struct {
 	EvictPrev  *node
 }
 
+ // IsValid checks if the node is still valid based on its expiration time.
 func (n *node) IsValid() bool {
 	return n.Expiration.IsZero() || n.Expiration.After(time.Now())
 }
 
+ // TTL returns the time-to-live of the node.
 func (n *node) TTL() time.Duration {
 	if n.Expiration.IsZero() {
 		return 0
@@ -34,6 +37,7 @@ func (n *node) TTL() time.Duration {
 	}
 }
 
+ // store represents the in-memory cache with eviction policies and periodic tasks.
 type store struct {
 	Bucket         []node
 	Length         uint64
@@ -46,6 +50,7 @@ type store struct {
 	mu             sync.Mutex
 }
 
+ // Init initializes the store with default settings.
 func (s *store) Init() {
 	s.Clear()
 	s.Policy.evict = &s.Evict
@@ -54,6 +59,7 @@ func (s *store) Init() {
 	s.Policy.SetPolicy(PolicyNone)
 }
 
+ // Clear removes all entries from the store.
 func (s *store) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,11 +72,13 @@ func (s *store) Clear() {
 	s.Evict.EvictPrev = &s.Evict
 }
 
+ // lookup calculates the hash and index for a given key.
 func lookup(s *store, key []byte) (uint64, uint64) {
 	hash := hash(key)
 	return hash % uint64(len(s.Bucket)), hash
 }
 
+ // lazyInitBucket initializes the hash bucket if it hasn't been initialized yet.
 func lazyInitBucket(n *node) {
 	if n.HashNext == nil {
 		n.HashNext = n
@@ -78,6 +86,7 @@ func lazyInitBucket(n *node) {
 	}
 }
 
+ // lookup finds a node in the store by key.
 func (s *store) lookup(key []byte) (*node, uint64, uint64) {
 	idx, hash := lookup(s, key)
 
@@ -94,6 +103,7 @@ func (s *store) lookup(key []byte) (*node, uint64, uint64) {
 	return nil, idx, hash
 }
 
+ // get retrieves a value from the store by key.
 func (s *store) get(key []byte) ([]byte, time.Duration, bool) {
 	v, _, _ := s.lookup(key)
 	if v != nil {
@@ -108,6 +118,7 @@ func (s *store) get(key []byte) ([]byte, time.Duration, bool) {
 	return nil, 0, false
 }
 
+ // Get retrieves a value from the store by key with locking.
 func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,14 +126,15 @@ func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
 	return s.get(key)
 }
 
+ // resize doubles the size of the hash table and rehashes all entries.
 func resize(s *store) {
 	bucket := make([]node, 2*len(s.Bucket))
 
 	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
-		if !v.IsValid() {
-			deleteNode(s, v)
-			continue
-		}
+		// if !v.IsValid() {
+		// 	deleteNode(s, v)
+		// 	continue
+		// }
 		idx := v.Hash % uint64(len(bucket))
 
 		n := &bucket[idx]
@@ -137,6 +149,7 @@ func resize(s *store) {
 	s.Bucket = bucket
 }
 
+ // cleanup removes expired entries from the store.
 func cleanup(s *store) {
 	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
 		if !v.IsValid() {
@@ -145,6 +158,7 @@ func cleanup(s *store) {
 	}
 }
 
+ // evict removes entries from the store based on the eviction policy.
 func evict(s *store) bool {
 	for s.MaxCost != 0 && s.MaxCost < s.Cost {
 		n := s.Policy.Evict()
@@ -156,6 +170,7 @@ func evict(s *store) bool {
 	return true
 }
 
+ // set adds or updates a key-value pair in the store.
 func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	v, idx, hash := s.lookup(key)
 	if v != nil {
@@ -195,6 +210,7 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	s.Length = s.Length + 1
 }
 
+ // Set adds or updates a key-value pair in the store with locking.
 func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,6 +218,7 @@ func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 	s.set(key, value, ttl)
 }
 
+ // deleteNode removes a node from the store.
 func deleteNode(s *store, v *node) {
 	v.HashNext.HashPrev = v.HashPrev
 	v.HashPrev.HashNext = v.HashNext
@@ -217,6 +234,7 @@ func deleteNode(s *store, v *node) {
 	s.Length = s.Length - 1
 }
 
+ // delete removes a key-value pair from the store.
 func (s *store) delete(key []byte) bool {
 	v, _, _ := s.lookup(key)
 	if v != nil {
@@ -227,6 +245,7 @@ func (s *store) delete(key []byte) bool {
 	return false
 }
 
+ // Delete removes a key-value pair from the store with locking.
 func (s *store) Delete(key []byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -288,7 +288,7 @@ func BenchmarkDecoder_DecodeStore(b *testing.B) {
 	for n := 1; n <= 10000; n *= 10 {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
 			want := setupTestStore(b)
-			for i := range 100 {
+			for i := range n {
 				buf := make([]byte, 8)
 				binary.LittleEndian.PutUint64(buf, uint64(i))
 				want.Set(buf, buf, 0)
