@@ -17,6 +17,23 @@ func setupTestDB[K any, V any](t testing.TB) *DB[K, V] {
 		db.Close()
 	})
 	return &db
+func TestDBConcurrentAccess(t *testing.T) {
+    db := setupTestDB[string, string](t)
+
+    go func() {
+        for i := 0; i < 100; i++ {
+            db.Set(fmt.Sprintf("Key%d", i), "Value", 0)
+        }
+    }()
+
+    go func() {
+        for i := 0; i < 100; i++ {
+            db.GetValue(fmt.Sprintf("Key%d", i))
+        }
+    }()
+
+    // Allow some time for goroutines to complete
+    time.Sleep(1 * time.Second)
 }
 
 func TestDBGetSet(t *testing.T) {
@@ -63,6 +80,20 @@ func TestDBGetSet(t *testing.T) {
 		got, _, err := db.GetValue("Key")
 		assert.NoError(t, err)
 		assert.Equal(t, want, got)
+	})
+
+	t.Run("Key Expiry", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDB[string, string](t)
+
+		err := db.Set("Key", "Value", 500*time.Millisecond)
+		assert.NoError(t, err)
+
+		time.Sleep(600 * time.Millisecond)
+
+		_, _, err = db.GetValue("Key")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
 	})
 }
 

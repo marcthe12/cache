@@ -40,6 +40,40 @@ func TestEncodeDecodeUint64(t *testing.T) {
 			assert.Equal(t, tt.value, decodedValue)
 		})
 	}
+func TestDecodeUint64Error(t *testing.T) {
+    var buf bytes.Buffer
+    buf.Write([]byte{0xFF}) // Invalid data for uint64
+    decoder := newDecoder(&buf)
+
+    _, err := decoder.DecodeUint64()
+    assert.Error(t, err)
+func TestEncodeDecodeTimeBoundary(t *testing.T) {
+    tests := []struct {
+        name  string
+        value time.Time
+    }{
+        {name: "Unix Epoch", value: time.Unix(0, 0)},
+        {name: "Far Future", value: time.Unix(1<<63-1, 0)},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            var buf bytes.Buffer
+            e := newEncoder(&buf)
+
+            err := e.EncodeTime(tt.value)
+            assert.NoError(t, err)
+            err = e.Flush()
+            assert.NoError(t, err)
+
+            decoder := newDecoder(bytes.NewReader(buf.Bytes()))
+
+            decodedValue, err := decoder.DecodeTime()
+            assert.NoError(t, err)
+
+            assert.Equal(t, tt.value, decodedValue)
+        })
+    }
 }
 
 func TestEncodeDecodeTime(t *testing.T) {

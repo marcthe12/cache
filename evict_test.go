@@ -86,6 +86,36 @@ func TestFIFOPolicy(t *testing.T) {
 			assert.Nil(t, policy.Evict())
 		})
 	})
+
+	t.Run("Eviction Order", func(t *testing.T) {
+		t.Parallel()
+
+		policy := lfuPolicy{evict: createSentinel(t)}
+
+		n0 := &node{Key: []byte("0"), Access: 1}
+		n1 := &node{Key: []byte("1"), Access: 1}
+
+		policy.OnInsert(n0)
+		policy.OnInsert(n1)
+
+		evictedNode := policy.Evict()
+		assert.Same(t, n0, evictedNode) // Assuming FIFO order for same access count
+	})
+
+	t.Run("With Zero TTL", func(t *testing.T) {
+		t.Parallel()
+
+		policy := ltrPolicy{evict: createSentinel(t), evictZero: false}
+
+		n0 := &node{Key: []byte("0"), Expiration: time.Time{}}
+		n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(1 * time.Hour)}
+
+		policy.OnInsert(n0)
+		policy.OnInsert(n1)
+
+		evictedNode := policy.Evict()
+		assert.Same(t, n1, evictedNode) // n0 should not be evicted due to zero TTL
+	})
 }
 
 func TestLRUPolicy(t *testing.T) {
