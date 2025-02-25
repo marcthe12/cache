@@ -9,7 +9,7 @@ import (
 
 func main() {
 	// Create an in-memory cache
-	db, err := cache.OpenMem[string, string]("example")
+	db, err := cache.OpenMem[string, string]()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return

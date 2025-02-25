@@ -22,6 +22,7 @@ func New(d time.Duration) *PauseTimer {
 		ret.Ticker = time.NewTicker(math.MaxInt64)
 		ret.Reset(0)
 	}
+
 	return ret
 }
 
@@ -29,6 +30,7 @@ func New(d time.Duration) *PauseTimer {
 func NewStopped(d time.Duration) *PauseTimer {
 	ret := New(d)
 	ret.Stop()
+
 	return ret
 }
 

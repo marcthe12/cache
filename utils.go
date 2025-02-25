@@ -7,6 +7,7 @@ import (
 // zero returns the zero value for the specified type.
 func zero[T any]() T {
 	var ret T
+
 	return ret
 }
 
@@ -16,5 +17,6 @@ func hash(data []byte) uint64 {
 	if _, err := hasher.Write(data); err != nil {
 		panic(err)
 	}
+
 	return hasher.Sum64()
 }

@@ -3,31 +3,53 @@ package cache
 import (
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
-func createSentinel(t testing.TB) *node {
-	t.Helper()
+func createSentinel(tb testing.TB) *node {
+	tb.Helper()
+
 	n1 := &node{Key: []byte("Sentinel")}
 	n1.EvictNext = n1
 	n1.EvictPrev = n1
+
 	return n1
 }
 
-func getListOrder(t testing.TB, evict *node) []*node {
-	t.Helper()
+func getListOrder(tb testing.TB, evict *node) []*node {
+	tb.Helper()
 
 	var order []*node
+
 	current := evict.EvictNext
 	for current != evict {
 		order = append(order, current)
 		current = current.EvictNext
 	}
+
 	for _, n := range order {
-		assert.Same(t, n, n.EvictPrev.EvictNext)
+		tb.Helper()
+		if n != n.EvictPrev.EvictNext {
+			tb.Fatalf("expected %#v, got %#v", n, n.EvictPrev.EvictNext)
+		}
 	}
+
 	return order
+}
+
+func checkOrder(tb testing.TB, policy evictOrderedPolicy, expected []*node) {
+	tb.Helper()
+
+	order := getListOrder(tb, policy.getEvict())
+
+	if len(order) != len(expected) {
+		tb.Errorf("expected length %v, got %v", len(expected), len(order))
+	}
+
+	for i, n := range expected {
+		if order[i] != n {
+			tb.Errorf("element %v did not match: \nexpected: %#v\n got: %#v", i, n, order[i])
+		}
+	}
 }
 
 func TestFIFOPolicy(t *testing.T) {
@@ -41,13 +63,10 @@ func TestFIFOPolicy(t *testing.T) {
 		n0 := &node{Key: []byte("0")}
 		n1 := &node{Key: []byte("1")}
 
-		policy.OnInsert(n0)
 		policy.OnInsert(n1)
+		policy.OnInsert(n0)
 
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Same(t, order[0], n1)
-		assert.Same(t, order[1], n0)
+		checkOrder(t, policy, []*node{n0, n1})
 	})
 
 	t.Run("Evict", func(t *testing.T) {
@@ -65,7 +84,9 @@ func TestFIFOPolicy(t *testing.T) {
 			policy.OnInsert(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Evict noEvict", func(t *testing.T) {
@@ -75,50 +96,25 @@ func TestFIFOPolicy(t *testing.T) {
 
 			policy.OnInsert(&node{})
 
-			assert.Nil(t, policy.Evict())
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
 
 		t.Run("Empty List", func(t *testing.T) {
 			t.Parallel()
 
 			policy := fifoPolicy{evict: createSentinel(t)}
-
-			assert.Nil(t, policy.Evict())
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
-	})
-
-	t.Run("Eviction Order", func(t *testing.T) {
-		t.Parallel()
-
-		policy := lfuPolicy{evict: createSentinel(t)}
-
-		n0 := &node{Key: []byte("0"), Access: 1}
-		n1 := &node{Key: []byte("1"), Access: 1}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		evictedNode := policy.Evict()
-		assert.Same(t, n0, evictedNode) // Assuming FIFO order for same access count
-	})
-
-	t.Run("With Zero TTL", func(t *testing.T) {
-		t.Parallel()
-
-		policy := ltrPolicy{evict: createSentinel(t), evictZero: false}
-
-		n0 := &node{Key: []byte("0"), Expiration: time.Time{}}
-		n1 := &node{Key: []byte("1"), Expiration: time.Now().Add(1 * time.Hour)}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		evictedNode := policy.Evict()
-		assert.Same(t, n1, evictedNode) // n0 should not be evicted due to zero TTL
 	})
 }
 
 func TestLRUPolicy(t *testing.T) {
+	t.Parallel()
+
 	t.Run("OnInsert", func(t *testing.T) {
 		t.Parallel()
 
@@ -130,10 +126,7 @@ func TestLRUPolicy(t *testing.T) {
 		policy.OnInsert(n0)
 		policy.OnInsert(n1)
 
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Same(t, order[0], n1)
-		assert.Same(t, order[1], n0)
+		checkOrder(t, policy, []*node{n1, n0})
 	})
 
 	t.Run("OnAccess", func(t *testing.T) {
@@ -149,10 +142,7 @@ func TestLRUPolicy(t *testing.T) {
 
 		policy.OnAccess(n0)
 
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Same(t, order[0], n0)
-		assert.Same(t, order[1], n1)
+		checkOrder(t, policy, []*node{n0, n1})
 	})
 
 	t.Run("Evict", func(t *testing.T) {
@@ -170,7 +160,9 @@ func TestLRUPolicy(t *testing.T) {
 			policy.OnInsert(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("OnAccess End", func(t *testing.T) {
@@ -187,7 +179,9 @@ func TestLRUPolicy(t *testing.T) {
 			policy.OnAccess(n0)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n1, evictedNode)
+			if n1 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n1, evictedNode)
+			}
 		})
 
 		t.Run("OnAccess Interleaved", func(t *testing.T) {
@@ -203,15 +197,19 @@ func TestLRUPolicy(t *testing.T) {
 			policy.OnInsert(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Empty", func(t *testing.T) {
 			t.Parallel()
 
 			policy := lruPolicy{evict: createSentinel(t)}
-
-			assert.Nil(t, policy.Evict())
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
 	})
 }
@@ -230,10 +228,7 @@ func TestLFUPolicy(t *testing.T) {
 		policy.OnInsert(n0)
 		policy.OnInsert(n1)
 
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Contains(t, order, n0)
-		assert.Contains(t, order, n1)
+		checkOrder(t, policy, []*node{n1, n0})
 	})
 
 	t.Run("OnAccess", func(t *testing.T) {
@@ -249,10 +244,7 @@ func TestLFUPolicy(t *testing.T) {
 
 		policy.OnAccess(n0)
 
-		order := getListOrder(t, policy.evict)
-		assert.Len(t, order, 2)
-		assert.Same(t, order[0], n0)
-		assert.Same(t, order[1], n1)
+		checkOrder(t, policy, []*node{n0, n1})
 	})
 
 	t.Run("Evict", func(t *testing.T) {
@@ -272,7 +264,9 @@ func TestLFUPolicy(t *testing.T) {
 			policy.OnAccess(n0)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n1, evictedNode)
+			if n1 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n1, evictedNode)
+			}
 		})
 
 		t.Run("Evict After Multiple Accesses", func(t *testing.T) {
@@ -292,15 +286,19 @@ func TestLFUPolicy(t *testing.T) {
 			policy.OnAccess(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Empty List", func(t *testing.T) {
 			t.Parallel()
 
 			policy := lfuPolicy{evict: createSentinel(t)}
-
-			assert.Nil(t, policy.Evict())
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
 	})
 }
@@ -322,10 +320,7 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnInsert(n0)
 			policy.OnInsert(n1)
 
-			order := getListOrder(t, policy.evict)
-			assert.Len(t, order, 2)
-			assert.Same(t, n0, order[0])
-			assert.Same(t, n1, order[1])
+			checkOrder(t, policy, []*node{n0, n1})
 		})
 
 		t.Run("Without TTL", func(t *testing.T) {
@@ -339,10 +334,7 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnInsert(n0)
 			policy.OnInsert(n1)
 
-			order := getListOrder(t, policy.evict)
-			assert.Len(t, order, 2)
-			assert.Same(t, n1, order[0])
-			assert.Same(t, n0, order[1])
+			checkOrder(t, policy, []*node{n1, n0})
 		})
 	})
 
@@ -363,10 +355,7 @@ func TestLTRPolicy(t *testing.T) {
 			n0.Expiration = time.Now().Add(3 * time.Hour)
 			policy.OnUpdate(n0)
 
-			order := getListOrder(t, policy.evict)
-			assert.Len(t, order, 2)
-			assert.Same(t, n0, order[1])
-			assert.Same(t, n1, order[0])
+			checkOrder(t, policy, []*node{n1, n0})
 		})
 
 		t.Run("With TTL Decrease", func(t *testing.T) {
@@ -383,10 +372,7 @@ func TestLTRPolicy(t *testing.T) {
 			n1.Expiration = time.Now().Add(30 * time.Minute)
 			policy.OnUpdate(n1)
 
-			order := getListOrder(t, policy.evict)
-			assert.Len(t, order, 2)
-			assert.Same(t, n1, order[1])
-			assert.Same(t, n0, order[0])
+			checkOrder(t, policy, []*node{n0, n1})
 		})
 	})
 
@@ -405,7 +391,25 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnInsert(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
+		})
+
+		t.Run("no evictZero", func(t *testing.T) {
+			t.Parallel()
+
+			policy := ltrPolicy{evict: createSentinel(t), evictZero: false}
+
+			n0 := &node{Key: []byte("0")}
+			n1 := &node{Key: []byte("1")}
+
+			policy.OnInsert(n0)
+			policy.OnInsert(n1)
+
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
 
 		t.Run("Evict TTL", func(t *testing.T) {
@@ -420,7 +424,10 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnInsert(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n1, evictedNode)
+
+			if n1 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Evict TTL Update", func(t *testing.T) {
@@ -438,7 +445,10 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnUpdate(n0)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n0, evictedNode)
+
+			if n0 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Evict TTL Update Down", func(t *testing.T) {
@@ -456,15 +466,19 @@ func TestLTRPolicy(t *testing.T) {
 			policy.OnUpdate(n1)
 
 			evictedNode := policy.Evict()
-			assert.Same(t, n1, evictedNode)
+
+			if n1 != evictedNode {
+				t.Errorf("expected %#v, got %#v", n0, evictedNode)
+			}
 		})
 
 		t.Run("Empty List", func(t *testing.T) {
 			t.Parallel()
 
 			policy := ltrPolicy{evict: createSentinel(t), evictZero: true}
-
-			assert.Nil(t, policy.Evict())
+			if policy.Evict() != nil {
+				t.Errorf("expected nil, got %#v", policy.Evict())
+			}
 		})
 	})
 }

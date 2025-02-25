@@ -3,12 +3,12 @@ package main
 import (
 	"fmt"
 
-	"code.qburst.com/marcpervaz//cache"
+	"github.com/marcthe12/cache"
 )
 
 func main() {
 	// Create an in-memory cache with LRU eviction policy
-	db, err := cache.OpenMem[string, string]("example", cache.WithPolicy(cache.PolicyLRU))
+	db, err := cache.OpenMem[string, string](cache.WithPolicy(cache.PolicyLRU))
 	if err != nil {
 		fmt.Println("Error:", err)
 		return

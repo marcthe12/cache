@@ -26,6 +26,7 @@ func (e *encoder) Flush() error {
 func (e *encoder) EncodeUint64(val uint64) error {
 	binary.LittleEndian.PutUint64(e.buf, val)
 	_, err := e.w.Write(e.buf)
+
 	return err
 }
 
@@ -39,6 +40,7 @@ func (e *encoder) EncodeBytes(val []byte) error {
 	}
 
 	_, err := e.w.Write(val)
+
 	return err
 }
 
@@ -84,6 +86,7 @@ func (e *encoder) EncodeStore(s *store) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -104,6 +107,7 @@ func (d *decoder) DecodeUint64() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	return binary.LittleEndian.Uint64(d.buf), nil
 }
 
@@ -112,7 +116,12 @@ func (d *decoder) DecodeTime() (time.Time, error) {
 	if err != nil {
 		return zero[time.Time](), err
 	}
-	return time.Unix(int64(ts), 0), nil
+
+	t := time.Unix(int64(ts), 0)
+	if t.IsZero() {
+		t = zero[time.Time]()
+	}
+	return t, nil
 }
 
 func (d *decoder) DecodeBytes() ([]byte, error) {
@@ -120,8 +129,10 @@ func (d *decoder) DecodeBytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	data := make([]byte, lenVal)
 	_, err = io.ReadFull(d.r, data)
+
 	return data, err
 }
 
@@ -132,18 +143,21 @@ func (d *decoder) DecodeNodes() (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	n.Hash = hash
 
 	expiration, err := d.DecodeTime()
 	if err != nil {
 		return nil, err
 	}
+
 	n.Expiration = expiration
 
 	access, err := d.DecodeUint64()
 	if err != nil {
 		return nil, err
 	}
+
 	n.Access = access
 
 	n.Key, err = d.DecodeBytes()
@@ -155,6 +169,7 @@ func (d *decoder) DecodeNodes() (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return n, err
 }
 
@@ -163,18 +178,21 @@ func (d *decoder) DecodeStore(s *store) error {
 	if err != nil {
 		return err
 	}
+
 	s.MaxCost = maxCost
 
 	policy, err := d.DecodeUint64()
 	if err != nil {
 		return err
 	}
+
 	s.Policy.SetPolicy(EvictionPolicyType(policy))
 
 	length, err := d.DecodeUint64()
 	if err != nil {
 		return err
 	}
+
 	s.Length = length
 
 	k := 128
@@ -206,6 +224,7 @@ func (d *decoder) DecodeStore(s *store) error {
 
 		s.Cost = s.Cost + uint64(len(v.Key)) + uint64(len(v.Value))
 	}
+
 	return nil
 }
 
@@ -227,6 +246,7 @@ func (s *store) LoadSnapshot(r io.ReadSeeker) error {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
+
 	d := newDecoder(r)
 
 	return d.DecodeStore(s)
