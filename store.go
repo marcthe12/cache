@@ -77,8 +77,8 @@ func (s *store) Clear() {
 	s.EvictList.EvictPrev = &s.EvictList
 }
 
-// lookup calculates the hash and index for a given key.
-func lookup(s *store, key []byte) (uint64, uint64) {
+// lookupIdx calculates the hash and index for a given key.
+func lookupIdx(s *store, key []byte) (uint64, uint64) {
 	hash := hash(key)
 
 	return hash % uint64(len(s.Bucket)), hash
@@ -94,7 +94,7 @@ func lazyInitBucket(n *node) {
 
 // lookup finds a node in the store by key.
 func (s *store) lookup(key []byte) (*node, uint64, uint64) {
-	idx, hash := lookup(s, key)
+	idx, hash := lookupIdx(s, key)
 
 	bucket := &s.Bucket[idx]
 
@@ -154,10 +154,12 @@ func (s *store) Cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for v := s.EvictList.EvictNext; v != &s.EvictList; v = v.EvictNext {
+	for v := s.EvictList.EvictNext; v != &s.EvictList; {
+		n := v.EvictNext
 		if !v.IsValid() {
 			deleteNode(s, v)
 		}
+		v = n
 	}
 }
 
@@ -166,16 +168,55 @@ func (s *store) Evict() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for s.MaxCost != 0 && s.MaxCost < s.Cost {
+	if s.MaxCost == 0 {
+		return true
+	}
+
+	for s.MaxCost < s.Cost {
 		n := s.Policy.Evict()
 		if n == nil {
 			break
 		}
-
 		deleteNode(s, n)
 	}
 
 	return true
+}
+
+// insert adds a new key-value pair to the store.
+func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
+	idx, hash := lookupIdx(s, key)
+	bucket := &s.Bucket[idx]
+
+	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
+		s.Resize()
+		// resize may invalidate pointer to bucket
+		_, idx, _ = s.lookup(key)
+		bucket = &s.Bucket[idx]
+		lazyInitBucket(bucket)
+	}
+
+	v := &node{
+		Hash:  hash,
+		Key:   key,
+		Value: value,
+	}
+
+	if ttl != 0 {
+		v.Expiration = time.Now().Add(ttl)
+	} else {
+		v.Expiration = zero[time.Time]()
+	}
+
+	v.HashPrev = bucket
+	v.HashNext = v.HashPrev.HashNext
+	v.HashNext.HashPrev = v
+	v.HashPrev.HashNext = v
+
+	s.Policy.OnInsert(v)
+
+	s.Cost = s.Cost + uint64(len(key)) + uint64(len(value))
+	s.Length = s.Length + 1
 }
 
 // Set adds or updates a key-value pair in the store with locking.
@@ -183,43 +224,20 @@ func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, idx, hash := s.lookup(key)
+	v, _, _ := s.lookup(key)
 	if v != nil {
 		s.Cost = s.Cost + uint64(len(value)) - uint64(len(v.Value))
 		v.Value = value
-		v.Expiration = time.Now().Add(ttl)
+		if ttl != 0 {
+			v.Expiration = time.Now().Add(ttl)
+		} else {
+			v.Expiration = zero[time.Time]()
+		}
 		s.Policy.OnUpdate(v)
+		return
 	}
 
-	bucket := &s.Bucket[idx]
-
-	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
-		s.Resize()
-		// resize may invidate pointer to bucket
-		_, idx, _ := s.lookup(key)
-		bucket = &s.Bucket[idx]
-		lazyInitBucket(bucket)
-	}
-
-	node := &node{
-		Hash:  hash,
-		Key:   key,
-		Value: value,
-	}
-
-	if ttl != 0 {
-		node.Expiration = time.Now().Add(ttl)
-	}
-
-	node.HashPrev = bucket
-	node.HashNext = node.HashPrev.HashNext
-	node.HashNext.HashPrev = node
-	node.HashPrev.HashNext = node
-
-	s.Policy.OnInsert(node)
-
-	s.Cost = s.Cost + uint64(len(key)) + uint64(len(value))
-	s.Length = s.Length + 1
+	s.insert(key, value, ttl)
 }
 
 // deleteNode removes a node from the store.
@@ -251,4 +269,58 @@ func (s *store) Delete(key []byte) bool {
 	}
 
 	return false
+}
+
+// UpdateInPlace retrieves a value from the store, processes it using the provided function,
+// and then sets the result back into the store with the same key.
+func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, error), ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	v, _, _ := s.lookup(key)
+	if v == nil {
+		return ErrKeyNotFound
+	}
+
+	if !v.IsValid() {
+		deleteNode(s, v)
+		return ErrKeyNotFound
+	}
+
+	processedValue, err := processFunc(v.Value)
+	if err != nil {
+		return err
+	}
+
+	s.Cost = s.Cost + uint64(len(processedValue)) - uint64(len(v.Value))
+	v.Value = processedValue
+	if ttl != 0 {
+		v.Expiration = time.Now().Add(ttl)
+	} else {
+		v.Expiration = zero[time.Time]()
+	}
+	s.Policy.OnUpdate(v)
+
+	return nil
+}
+
+// Memorize attempts to retrieve a value from the store. If the retrieval fails,
+// it sets the result of the factory function into the store and returns that result.
+func (s *store) Memorize(key []byte, factoryFunc func() ([]byte, error), ttl time.Duration) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	v, _, _ := s.lookup(key)
+	if v != nil && v.IsValid() {
+		s.Policy.OnAccess(v)
+		return v.Value, nil
+	}
+
+	factoryValue, err := factoryFunc()
+	if err != nil {
+		return nil, err
+	}
+
+	s.insert(key, factoryValue, ttl)
+	return factoryValue, nil
 }

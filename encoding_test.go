@@ -3,7 +3,6 @@ package cache
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"os"
 	"strconv"
 	"testing"
@@ -36,91 +35,17 @@ func TestEncodeDecodeUint64(t *testing.T) {
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
-			err := e.EncodeUint64(tt.value)
-			if err != nil {
+			if err := e.EncodeUint64(tt.value); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			err = e.Flush()
-			if err != nil {
+
+			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
 			decoder := newDecoder(bytes.NewReader(buf.Bytes()))
 
 			decodedValue, err := decoder.DecodeUint64()
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			if tt.value != decodedValue {
-				t.Errorf("expected %v, got %v", tt.value, decodedValue)
-			}
-		})
-	}
-}
-
-func TestEncodeDecodeStoreWithPolicies(t *testing.T) {
-	policies := []EvictionPolicyType{PolicyFIFO, PolicyLRU, PolicyLFU, PolicyLTR}
-
-	for _, policy := range policies {
-		t.Run(fmt.Sprintf("Policy_%d", policy), func(t *testing.T) {
-			var buf bytes.Buffer
-			e := newEncoder(&buf)
-
-			store := setupTestStore(t)
-			store.Policy.SetPolicy(policy)
-
-			err := e.EncodeStore(store)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			err = e.Flush()
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			decoder := newDecoder(bytes.NewReader(buf.Bytes()))
-			decodedStore := setupTestStore(t)
-
-			err = decoder.DecodeStore(decodedStore)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			if store.Policy.Type != decodedStore.Policy.Type {
-				t.Errorf("expected %v, got %v", store.Policy.Type, decodedStore.Policy.Type)
-			}
-		})
-	}
-}
-
-func TestEncodeDecodeTimeBoundary(t *testing.T) {
-	tests := []struct {
-		name  string
-		value time.Time
-	}{
-		{name: "Unix Epoch", value: time.Unix(0, 0)},
-		{name: "Far Future", value: time.Unix(1<<63-1, 0)},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			e := newEncoder(&buf)
-
-			err := e.EncodeTime(tt.value)
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			err = e.Flush()
-
-			decoder := newDecoder(bytes.NewReader(buf.Bytes()))
-
-			decodedValue, err := decoder.DecodeTime()
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -147,12 +72,10 @@ func TestEncodeDecodeTime(t *testing.T) {
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
-			err := e.EncodeTime(tt.value)
-			if err != nil {
+			if err := e.EncodeTime(tt.value); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			err = e.Flush()
-			if err != nil {
+			if err := e.Flush(); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -175,19 +98,16 @@ func TestDecodeBytesError(t *testing.T) {
 	var buf bytes.Buffer
 	e := newEncoder(&buf)
 
-	err := e.EncodeBytes([]byte("DEADBEEF"))
-	if err != nil {
+	if err := e.EncodeBytes([]byte("DEADBEEF")); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	err = e.Flush()
-	if err != nil {
+	if err := e.Flush(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
 	decoder := newDecoder(bytes.NewReader(buf.Bytes()[:10]))
 
-	_, err = decoder.DecodeBytes()
-	if err == nil {
+	if _, err := decoder.DecodeBytes(); err == nil {
 		t.Errorf("expected an error but got none")
 	}
 }
@@ -207,12 +127,10 @@ func TestEncodeDecodeBytes(t *testing.T) {
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
-			err := e.EncodeBytes(tt.value)
-			if err != nil {
+			if err := e.EncodeBytes(tt.value); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			err = e.Flush()
-			if err != nil {
+			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
@@ -272,12 +190,11 @@ func TestEncodeDecodeNode(t *testing.T) {
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
-			err := e.EncodeNode(tt.value)
-			if err != nil {
+			if err := e.EncodeNode(tt.value); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			err = e.Flush()
-			if err != nil {
+
+			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
@@ -348,8 +265,8 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 
 			want := setupTestStore(t)
 			want.MaxCost = uint64(tt.maxCost)
-			err := want.Policy.SetPolicy(tt.policy)
-			if err != nil {
+
+			if err := want.Policy.SetPolicy(tt.policy); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
@@ -357,20 +274,17 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 				want.Set([]byte(k), []byte(v), 0)
 			}
 
-			err = e.EncodeStore(want)
-			if err != nil {
+			if err := e.EncodeStore(want); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			err = e.Flush()
-			if err != nil {
+			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
 			decoder := newDecoder(bytes.NewReader(buf.Bytes()))
 			got := setupTestStore(t)
 
-			err = decoder.DecodeStore(got)
-			if err != nil {
+			if err := decoder.DecodeStore(got); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
@@ -384,8 +298,8 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 				t.Errorf("expected %v, got %v", want.Policy.Type, got.Policy.Type)
 			}
 
-			gotOrder := getListOrder(t, &got.Evict)
-			for i, v := range getListOrder(t, &want.Evict) {
+			gotOrder := getListOrder(t, &got.EvictList)
+			for i, v := range getListOrder(t, &want.EvictList) {
 				if !bytes.Equal(v.Key, gotOrder[i].Key) {
 					t.Errorf("expected %#v, got %#v", v.Key, gotOrder[i].Key)
 				}
@@ -423,8 +337,7 @@ func BenchmarkEncoder_EncodeStore(b *testing.B) {
 				want.Set(buf, buf, 0)
 			}
 
-			err = want.Snapshot(file)
-			if err != nil {
+			if err = want.Snapshot(file); err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
 
@@ -438,7 +351,9 @@ func BenchmarkEncoder_EncodeStore(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				want.Snapshot(file)
+				if err := want.Snapshot(file); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
 	}
@@ -464,8 +379,7 @@ func BenchmarkDecoder_DecodeStore(b *testing.B) {
 				want.Set(buf, buf, 0)
 			}
 
-			err = want.Snapshot(file)
-			if err != nil {
+			if err = want.Snapshot(file); err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
 			fileInfo, err := file.Stat()
@@ -478,7 +392,9 @@ func BenchmarkDecoder_DecodeStore(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				want.LoadSnapshot(file)
+				if err := want.LoadSnapshot(file); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
 	}

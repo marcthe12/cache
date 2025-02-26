@@ -136,7 +136,9 @@ func BenchmarkDBGet(b *testing.B) {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n {
-				db.Set(i, i, 0)
+				if err := db.Set(i, i, 0); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 
 			b.ReportAllocs()
@@ -144,7 +146,9 @@ func BenchmarkDBGet(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				db.GetValue(n - 1)
+				if _, _, err := db.GetValue(n - 1); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
 	}
@@ -155,14 +159,18 @@ func BenchmarkDBSet(b *testing.B) {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n - 1 {
-				db.Set(i, i, 0)
+				if err := db.Set(i, i, 0); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for b.Loop() {
-				db.Set(n, n, 0)
+				if err := db.Set(n, n, 0); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
 	}
@@ -173,15 +181,21 @@ func BenchmarkDBDelete(b *testing.B) {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n - 1 {
-				db.Set(i, i, 0)
+				if err := db.Set(i, i, 0); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for b.Loop() {
-				db.Set(n, n, 0)
-				db.Delete(n)
+				if err := db.Set(n, n, 0); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
+				if err := db.Delete(n); err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
 	}

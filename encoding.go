@@ -81,7 +81,7 @@ func (e *encoder) EncodeStore(s *store) error {
 		return err
 	}
 
-	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
+	for v := s.EvictList.EvictNext; v != &s.EvictList; v = v.EvictNext {
 		if err := e.EncodeNode(v); err != nil {
 			return err
 		}
@@ -186,7 +186,9 @@ func (d *decoder) DecodeStore(s *store) error {
 		return err
 	}
 
-	s.Policy.SetPolicy(EvictionPolicyType(policy))
+	if err := s.Policy.SetPolicy(EvictionPolicyType(policy)); err != nil {
+		return err
+	}
 
 	length, err := d.DecodeUint64()
 	if err != nil {
@@ -217,7 +219,7 @@ func (d *decoder) DecodeStore(s *store) error {
 		v.HashNext.HashPrev = v
 		v.HashPrev.HashNext = v
 
-		v.EvictNext = &s.Evict
+		v.EvictNext = &s.EvictList
 		v.EvictPrev = v.EvictNext.EvictPrev
 		v.EvictNext.EvictPrev = v
 		v.EvictPrev.EvictNext = v

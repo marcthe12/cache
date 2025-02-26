@@ -80,16 +80,18 @@ type fifoPolicy struct {
 }
 
 // OnInsert adds a node to the eviction list.
-func (s fifoPolicy) OnInsert(node *node) {
-	pushEvict(node, s.evict)
+func (s fifoPolicy) OnInsert(n *node) {
+	pushEvict(n, s.evict)
 }
 
 // OnAccess is a no-op for fifoPolicy.
 func (fifoPolicy) OnAccess(n *node) {
+	// Noop
 }
 
 // OnUpdate is a no-op for fifoPolicy.
 func (fifoPolicy) OnUpdate(n *node) {
+	// Noop
 }
 
 // Evict returns the oldest node for fifoPolicy.
@@ -111,20 +113,20 @@ type lruPolicy struct {
 }
 
 // OnInsert adds a node to the eviction list.
-func (s lruPolicy) OnInsert(node *node) {
-	pushEvict(node, s.evict)
+func (s lruPolicy) OnInsert(n *node) {
+	pushEvict(n, s.evict)
 }
 
 // OnUpdate moves the accessed node to the front of the eviction list.
-func (s lruPolicy) OnUpdate(node *node) {
-	s.OnAccess(node)
+func (s lruPolicy) OnUpdate(n *node) {
+	s.OnAccess(n)
 }
 
 // OnAccess moves the accessed node to the front of the eviction list.
-func (s lruPolicy) OnAccess(node *node) {
-	node.EvictNext.EvictPrev = node.EvictPrev
-	node.EvictPrev.EvictNext = node.EvictNext
-	s.OnInsert(node)
+func (s lruPolicy) OnAccess(n *node) {
+	n.EvictNext.EvictPrev = n.EvictPrev
+	n.EvictPrev.EvictNext = n.EvictNext
+	s.OnInsert(n)
 }
 
 // Evict returns the least recently used node for lruPolicy.
@@ -146,40 +148,40 @@ type lfuPolicy struct {
 }
 
 // OnInsert adds a node to the eviction list and initializes its access count.
-func (s lfuPolicy) OnInsert(node *node) {
-	pushEvict(node, s.evict)
+func (s lfuPolicy) OnInsert(n *node) {
+	pushEvict(n, s.evict)
 }
 
 // OnUpdate increments the access count of the node and reorders the list.
-func (s lfuPolicy) OnUpdate(node *node) {
-	s.OnAccess(node)
+func (s lfuPolicy) OnUpdate(n *node) {
+	s.OnAccess(n)
 }
 
 // OnAccess increments the access count of the node and reorders the list.
-func (s lfuPolicy) OnAccess(node *node) {
-	node.Access++
+func (s lfuPolicy) OnAccess(n *node) {
+	n.Access++
 
-	for v := node.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
-		if v.Access <= node.Access {
-			node.EvictNext.EvictPrev = node.EvictPrev
-			node.EvictPrev.EvictNext = node.EvictNext
+	for v := n.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
+		if v.Access <= n.Access {
+			n.EvictNext.EvictPrev = n.EvictPrev
+			n.EvictPrev.EvictNext = n.EvictNext
 
-			node.EvictPrev = v
-			node.EvictNext = node.EvictPrev.EvictNext
-			node.EvictNext.EvictPrev = node
-			node.EvictPrev.EvictNext = node
+			n.EvictPrev = v
+			n.EvictNext = n.EvictPrev.EvictNext
+			n.EvictNext.EvictPrev = n
+			n.EvictPrev.EvictNext = n
 
 			return
 		}
 	}
 
-	node.EvictNext.EvictPrev = node.EvictPrev
-	node.EvictPrev.EvictNext = node.EvictNext
+	n.EvictNext.EvictPrev = n.EvictPrev
+	n.EvictPrev.EvictNext = n.EvictNext
 
-	node.EvictPrev = s.evict
-	node.EvictNext = node.EvictPrev.EvictNext
-	node.EvictNext.EvictPrev = node
-	node.EvictPrev.EvictNext = node
+	n.EvictPrev = s.evict
+	n.EvictNext = n.EvictPrev.EvictNext
+	n.EvictNext.EvictPrev = n
+	n.EvictPrev.EvictNext = n
 }
 
 // Evict returns the least frequently used node for LFU.
@@ -203,55 +205,56 @@ type ltrPolicy struct {
 
 // OnInsert adds a node to the eviction list based on its TTL (Time To Live).
 // It places the node in the correct position in the list based on TTL.
-func (s ltrPolicy) OnInsert(node *node) {
-	pushEvict(node, s.evict)
+func (s ltrPolicy) OnInsert(n *node) {
+	pushEvict(n, s.evict)
 
-	s.OnUpdate(node)
+	s.OnUpdate(n)
 }
 
 // OnAccess is a no-op for ltrPolicy.
 // It does not perform any action when a node is accessed.
-func (s ltrPolicy) OnAccess(node *node) {
+func (s ltrPolicy) OnAccess(n *node) {
+	// Noop
 }
 
 // OnUpdate updates the position of the node in the eviction list based on its TTL.
 // It reorders the list to maintain the correct order based on TTL.
-func (s ltrPolicy) OnUpdate(node *node) {
-	if node.TTL() == 0 {
+func (s ltrPolicy) OnUpdate(n *node) {
+	if n.TTL() == 0 {
 		return
 	}
 
-	for v := node.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
+	for v := n.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
 		if v.TTL() == 0 {
 			continue
 		}
 
-		if v.TTL() < node.TTL() {
-			node.EvictNext.EvictPrev = node.EvictPrev
-			node.EvictPrev.EvictNext = node.EvictNext
+		if v.TTL() < n.TTL() {
+			n.EvictNext.EvictPrev = n.EvictPrev
+			n.EvictPrev.EvictNext = n.EvictNext
 
-			node.EvictPrev = v
-			node.EvictNext = node.EvictPrev.EvictNext
-			node.EvictNext.EvictPrev = node
-			node.EvictPrev.EvictNext = node
+			n.EvictPrev = v
+			n.EvictNext = n.EvictPrev.EvictNext
+			n.EvictNext.EvictPrev = n
+			n.EvictPrev.EvictNext = n
 
 			return
 		}
 	}
 
-	for v := node.EvictNext; v.EvictNext != s.evict; v = v.EvictNext {
+	for v := n.EvictNext; v.EvictNext != s.evict; v = v.EvictNext {
 		if v.TTL() == 0 {
 			continue
 		}
 
-		if v.TTL() > node.TTL() {
-			node.EvictNext.EvictPrev = node.EvictPrev
-			node.EvictPrev.EvictNext = node.EvictNext
+		if v.TTL() > n.TTL() {
+			n.EvictNext.EvictPrev = n.EvictPrev
+			n.EvictPrev.EvictNext = n.EvictNext
 
-			node.EvictPrev = v
-			node.EvictNext = node.EvictPrev.EvictNext
-			node.EvictNext.EvictPrev = node
-			node.EvictPrev.EvictNext = node
+			n.EvictPrev = v
+			n.EvictNext = n.EvictPrev.EvictNext
+			n.EvictNext.EvictPrev = n
+			n.EvictPrev.EvictNext = n
 
 			return
 		}

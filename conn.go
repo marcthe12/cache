@@ -3,6 +3,7 @@ package cache
 import (
 	"errors"
 	"io"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -58,7 +59,9 @@ func openFile(filename string, options ...Option) (*db, error) {
 func openMem(options ...Option) (*db, error) {
 	ret := &db{}
 	ret.Store.Init()
-	ret.SetConfig(options...)
+	if err := ret.SetConfig(options...); err != nil {
+		return nil, err
+	}
 
 	return ret, nil
 }
@@ -123,6 +126,12 @@ func SetCleanupTime(t time.Duration) Option {
 func (d *db) backgroundWorker() {
 	defer d.wg.Done()
 
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in background worker: %v", r)
+		}
+	}()
+
 	d.Store.SnapshotTicker.Resume()
 	defer d.Store.SnapshotTicker.Stop()
 
@@ -136,25 +145,30 @@ func (d *db) backgroundWorker() {
 		case <-d.Store.SnapshotTicker.C:
 			d.Flush()
 		case <-d.Store.CleanupTicker.C:
-			cleanup(&d.Store)
-			evict(&d.Store)
+			d.Store.Cleanup()
+			d.Store.Evict()
 		}
 	}
 }
 
 // Close stops the background worker and cleans up resources.
-func (d *db) Close() {
+func (d *db) Close() error {
 	close(d.Stop)
 	d.wg.Wait()
-	d.Flush()
+	err := d.Flush()
 	d.Clear()
 
+	var err1 error
 	if d.File != nil {
 		closer, ok := d.File.(io.Closer)
 		if ok {
-			closer.Close()
+			err1 = closer.Close()
 		}
 	}
+	if err != nil {
+		return err
+	}
+	return err1
 }
 
 // Flush writes the current state of the store to the file.
@@ -272,4 +286,56 @@ func (h *DB[K, V]) Delete(key K) error {
 	}
 
 	return nil
+}
+
+// UpdateInPlace retrieves a value from the cache, processes it using the provided function,
+// and then sets the result back into the cache with the same key.
+func (h *DB[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error {
+	keyData, err := marshal(key)
+	if err != nil {
+		return err
+	}
+
+	return h.Store.UpdateInPlace(keyData, func(data []byte) ([]byte, error) {
+		var value V
+		if err := unmarshal(data, &value); err != nil {
+			return nil, err
+		}
+
+		processedValue, err := processFunc(value)
+		if err != nil {
+			return nil, err
+		}
+
+		return marshal(processedValue)
+	}, ttl)
+}
+
+// Memoize attempts to retrieve a value from the cache. If the retrieval fails,
+// it sets the result of the factory function into the cache and returns that result.
+func (h *DB[K, V]) Memoize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
+	keyData, err := marshal(key)
+	if err != nil {
+		return zero[V](), err
+	}
+
+	data, err := h.Store.Memoize(keyData, func() ([]byte, error) {
+		value, err := factoryFunc()
+		if err != nil {
+			return nil, err
+		}
+
+		return marshal(value)
+	}, ttl)
+
+	if err != nil {
+		return zero[V](), err
+	}
+
+	var value V
+	if err := unmarshal(data, &value); err != nil {
+		return zero[V](), err
+	}
+
+	return value, nil
 }
