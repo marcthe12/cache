@@ -17,7 +17,6 @@ type node struct {
 	Access     uint64
 	Key        []byte
 	Value      []byte
-	mu         sync.Mutex
 
 	HashNext  *node
 	HashPrev  *node
@@ -44,7 +43,7 @@ type store struct {
 	Bucket         []node
 	Length         uint64
 	Cost           uint64
-	Evict          node
+	EvictList      node
 	MaxCost        uint64
 	SnapshotTicker *pausedtimer.PauseTimer
 	CleanupTicker  *pausedtimer.PauseTimer
@@ -56,7 +55,7 @@ type store struct {
 // Init initializes the store with default settings.
 func (s *store) Init() {
 	s.Clear()
-	s.Policy.evict = &s.Evict
+	s.Policy.evict = &s.EvictList
 	s.SnapshotTicker = pausedtimer.NewStopped(0)
 	s.CleanupTicker = pausedtimer.NewStopped(10 * time.Second)
 
@@ -74,8 +73,8 @@ func (s *store) Clear() {
 	s.Length = 0
 	s.Cost = 0
 
-	s.Evict.EvictNext = &s.Evict
-	s.Evict.EvictPrev = &s.Evict
+	s.EvictList.EvictNext = &s.EvictList
+	s.EvictList.EvictPrev = &s.EvictList
 }
 
 // lookup calculates the hash and index for a given key.
@@ -110,8 +109,11 @@ func (s *store) lookup(key []byte) (*node, uint64, uint64) {
 	return nil, idx, hash
 }
 
-// get retrieves a value from the store by key.
-func (s *store) get(key []byte) ([]byte, time.Duration, bool) {
+// Get retrieves a value from the store by key with locking.
+func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	v, _, _ := s.lookup(key)
 	if v != nil {
 		if !v.IsValid() {
@@ -128,23 +130,11 @@ func (s *store) get(key []byte) ([]byte, time.Duration, bool) {
 	return nil, 0, false
 }
 
-// Get retrieves a value from the store by key with locking.
-func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.get(key)
-}
-
 // resize doubles the size of the hash table and rehashes all entries.
-func resize(s *store) {
+func (s *store) Resize() {
 	bucket := make([]node, 2*len(s.Bucket))
 
-	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
-		// if !v.IsValid() {
-		// 	deleteNode(s, v)
-		// 	continue
-		// }
+	for v := s.EvictList.EvictNext; v != &s.EvictList; v = v.EvictNext {
 		idx := v.Hash % uint64(len(bucket))
 
 		n := &bucket[idx]
@@ -160,8 +150,11 @@ func resize(s *store) {
 }
 
 // cleanup removes expired entries from the store.
-func cleanup(s *store) {
-	for v := s.Evict.EvictNext; v != &s.Evict; v = v.EvictNext {
+func (s *store) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for v := s.EvictList.EvictNext; v != &s.EvictList; v = v.EvictNext {
 		if !v.IsValid() {
 			deleteNode(s, v)
 		}
@@ -169,7 +162,10 @@ func cleanup(s *store) {
 }
 
 // evict removes entries from the store based on the eviction policy.
-func evict(s *store) bool {
+func (s *store) Evict() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for s.MaxCost != 0 && s.MaxCost < s.Cost {
 		n := s.Policy.Evict()
 		if n == nil {
@@ -182,8 +178,11 @@ func evict(s *store) bool {
 	return true
 }
 
-// set adds or updates a key-value pair in the store.
-func (s *store) set(key []byte, value []byte, ttl time.Duration) {
+// Set adds or updates a key-value pair in the store with locking.
+func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	v, idx, hash := s.lookup(key)
 	if v != nil {
 		s.Cost = s.Cost + uint64(len(value)) - uint64(len(v.Value))
@@ -195,7 +194,7 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	bucket := &s.Bucket[idx]
 
 	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
-		resize(s)
+		s.Resize()
 		// resize may invidate pointer to bucket
 		_, idx, _ := s.lookup(key)
 		bucket = &s.Bucket[idx]
@@ -223,14 +222,6 @@ func (s *store) set(key []byte, value []byte, ttl time.Duration) {
 	s.Length = s.Length + 1
 }
 
-// Set adds or updates a key-value pair in the store with locking.
-func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.set(key, value, ttl)
-}
-
 // deleteNode removes a node from the store.
 func deleteNode(s *store, v *node) {
 	v.HashNext.HashPrev = v.HashPrev
@@ -247,8 +238,11 @@ func deleteNode(s *store, v *node) {
 	s.Length = s.Length - 1
 }
 
-// delete removes a key-value pair from the store.
-func (s *store) delete(key []byte) bool {
+// Delete removes a key-value pair from the store with locking.
+func (s *store) Delete(key []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	v, _, _ := s.lookup(key)
 	if v != nil {
 		deleteNode(s, v)
@@ -257,12 +251,4 @@ func (s *store) delete(key []byte) bool {
 	}
 
 	return false
-}
-
-// Delete removes a key-value pair from the store with locking.
-func (s *store) Delete(key []byte) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.delete(key)
 }
