@@ -248,10 +248,14 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 		{
 			name: "Many Items",
 			store: map[string]string{
-				"Test1": "Test",
-				"Test2": "Test",
-				"Test3": "Test",
-				"Test4": "Test",
+				"1": "Test",
+				"2": "Test",
+				"3": "Test",
+				"4": "Test",
+				"5": "Test",
+				"6": "Test",
+				"7": "Test",
+				"8": "Test",
 			},
 			policy:  PolicyNone,
 			maxCost: 0,

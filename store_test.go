@@ -229,7 +229,7 @@ func TestStoreMemoize(t *testing.T) {
 			return []byte("Value"), nil
 		}
 
-		got, err := store.Memoize([]byte("Key"), factoryFunc, 1*time.Hour)
+		got, err := store.Memorize([]byte("Key"), factoryFunc, 1*time.Hour)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestStoreMemoize(t *testing.T) {
 			return []byte("NewValue"), nil
 		}
 
-		got, err := store.Memoize([]byte("Key"), factoryFunc, 1*time.Hour)
+		got, err := store.Memorize([]byte("Key"), factoryFunc, 1*time.Hour)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

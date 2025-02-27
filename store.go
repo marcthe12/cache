@@ -8,20 +8,37 @@ import (
 	"github.com/marcthe12/cache/internal/pausedtimer"
 )
 
-const initialBucketSize uint64 = 8
+const (
+	initialBucketSize uint64  = 8
+	loadFactor        float64 = 0.75
+)
 
 // node represents an entry in the cache with metadata for eviction and expiration.
 type node struct {
 	Hash       uint64
-	Expiration time.Time
-	Access     uint64
 	Key        []byte
 	Value      []byte
+	Expiration time.Time
+	Access     uint64
 
 	HashNext  *node
 	HashPrev  *node
 	EvictNext *node
 	EvictPrev *node
+}
+
+func (n *node) UnlinkHash() {
+	n.HashNext.HashPrev = n.HashPrev
+	n.HashPrev.HashNext = n.HashNext
+	n.HashNext = nil
+	n.HashPrev = nil
+}
+
+func (n *node) UnlinkEvict() {
+	n.EvictNext.EvictPrev = n.EvictPrev
+	n.EvictPrev.EvictNext = n.EvictNext
+	n.EvictNext = nil
+	n.EvictPrev = nil
 }
 
 // IsValid checks if the node is still valid based on its expiration time.
@@ -36,6 +53,10 @@ func (n *node) TTL() time.Duration {
 	} else {
 		return time.Until(n.Expiration)
 	}
+}
+
+func (n *node) Cost() uint64 {
+	return uint64(len(n.Key) + len(n.Value))
 }
 
 // store represents the in-memory cache with eviction policies and periodic tasks.
@@ -188,10 +209,10 @@ func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
 	idx, hash := lookupIdx(s, key)
 	bucket := &s.Bucket[idx]
 
-	if float64(s.Length)/float64(len(s.Bucket)) > 0.75 {
+	if float64(s.Length)/float64(len(s.Bucket)) > float64(loadFactor) {
 		s.Resize()
 		// resize may invalidate pointer to bucket
-		_, idx, _ = s.lookup(key)
+		idx, _ = lookupIdx(s, key)
 		bucket = &s.Bucket[idx]
 		lazyInitBucket(bucket)
 	}
@@ -215,7 +236,7 @@ func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
 
 	s.Policy.OnInsert(v)
 
-	s.Cost = s.Cost + uint64(len(key)) + uint64(len(value))
+	s.Cost = s.Cost + v.Cost()
 	s.Length = s.Length + 1
 }
 
@@ -226,13 +247,14 @@ func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 
 	v, _, _ := s.lookup(key)
 	if v != nil {
-		s.Cost = s.Cost + uint64(len(value)) - uint64(len(v.Value))
+		cost := v.Cost()
 		v.Value = value
 		if ttl != 0 {
 			v.Expiration = time.Now().Add(ttl)
 		} else {
 			v.Expiration = zero[time.Time]()
 		}
+		s.Cost = s.Cost + v.Cost() - cost
 		s.Policy.OnUpdate(v)
 		return
 	}
@@ -242,17 +264,10 @@ func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 
 // deleteNode removes a node from the store.
 func deleteNode(s *store, v *node) {
-	v.HashNext.HashPrev = v.HashPrev
-	v.HashPrev.HashNext = v.HashNext
-	v.HashNext = nil
-	v.HashPrev = nil
+	v.UnlinkEvict()
+	v.UnlinkHash()
 
-	v.EvictNext.EvictPrev = v.EvictPrev
-	v.EvictPrev.EvictNext = v.EvictNext
-	v.EvictNext = nil
-	v.EvictPrev = nil
-
-	s.Cost = s.Cost - (uint64(len(v.Key)) + uint64(len(v.Value)))
+	s.Cost = s.Cost - v.Cost()
 	s.Length = s.Length - 1
 }
 
@@ -287,18 +302,19 @@ func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, erro
 		return ErrKeyNotFound
 	}
 
-	processedValue, err := processFunc(v.Value)
+	value, err := processFunc(v.Value)
 	if err != nil {
 		return err
 	}
 
-	s.Cost = s.Cost + uint64(len(processedValue)) - uint64(len(v.Value))
-	v.Value = processedValue
+	cost := v.Cost()
+	v.Value = value
 	if ttl != 0 {
 		v.Expiration = time.Now().Add(ttl)
 	} else {
 		v.Expiration = zero[time.Time]()
 	}
+	s.Cost = s.Cost + v.Cost() - cost
 	s.Policy.OnUpdate(v)
 
 	return nil
@@ -306,7 +322,7 @@ func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, erro
 
 // Memorize attempts to retrieve a value from the store. If the retrieval fails,
 // it sets the result of the factory function into the store and returns that result.
-func (s *store) Memorize(key []byte, factoryFunc func() ([]byte, error), ttl time.Duration) ([]byte, error) {
+func (s *store) Memorize(key []byte, factory func() ([]byte, error), ttl time.Duration) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -316,11 +332,11 @@ func (s *store) Memorize(key []byte, factoryFunc func() ([]byte, error), ttl tim
 		return v.Value, nil
 	}
 
-	factoryValue, err := factoryFunc()
+	value, err := factory()
 	if err != nil {
 		return nil, err
 	}
 
-	s.insert(key, factoryValue, ttl)
-	return factoryValue, nil
+	s.insert(key, value, ttl)
+	return value, nil
 }

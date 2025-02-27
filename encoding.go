@@ -197,9 +197,9 @@ func (d *decoder) DecodeStore(s *store) error {
 
 	s.Length = length
 
-	k := 128
-	for k < int(s.Length) {
-		k = k << 1
+	k := initialBucketSize
+	for float64(s.Length)/float64(k) > float64(loadFactor) {
+		k = k * 2
 	}
 
 	s.Bucket = make([]node, k)

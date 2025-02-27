@@ -311,15 +311,15 @@ func (h *DB[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time
 	}, ttl)
 }
 
-// Memoize attempts to retrieve a value from the cache. If the retrieval fails,
+// Memorize attempts to retrieve a value from the cache. If the retrieval fails,
 // it sets the result of the factory function into the cache and returns that result.
-func (h *DB[K, V]) Memoize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
+func (h *DB[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
 	keyData, err := marshal(key)
 	if err != nil {
 		return zero[V](), err
 	}
 
-	data, err := h.Store.Memoize(keyData, func() ([]byte, error) {
+	data, err := h.Store.Memorize(keyData, func() ([]byte, error) {
 		value, err := factoryFunc()
 		if err != nil {
 			return nil, err
