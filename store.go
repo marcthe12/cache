@@ -70,13 +70,17 @@ type store struct {
 	CleanupTicker  *pausedtimer.PauseTimer
 	Policy         evictionPolicy
 
-	mu sync.Mutex
+	Lock      sync.RWMutex
+	EvictLock sync.RWMutex
 }
 
 // Init initializes the store with default settings.
 func (s *store) Init() {
 	s.Clear()
-	s.Policy.evict = &s.EvictList
+	s.Policy = evictionPolicy{
+		ListLock: &s.EvictLock,
+		Sentinel: &s.EvictList,
+	}
 	s.SnapshotTicker = pausedtimer.NewStopped(0)
 	s.CleanupTicker = pausedtimer.NewStopped(10 * time.Second)
 
@@ -87,8 +91,8 @@ func (s *store) Init() {
 
 // Clear removes all entries from the store.
 func (s *store) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	s.Bucket = make([]node, initialBucketSize)
 	s.Length = 0
@@ -132,13 +136,13 @@ func (s *store) lookup(key []byte) (*node, uint64, uint64) {
 
 // Get retrieves a value from the store by key with locking.
 func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	v, _, _ := s.lookup(key)
 	if v != nil {
 		if !v.IsValid() {
-			deleteNode(s, v)
+			//deleteNode(s, v)
 
 			return nil, 0, false
 		}
@@ -155,16 +159,28 @@ func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
 func (s *store) Resize() {
 	bucket := make([]node, 2*len(s.Bucket))
 
-	for v := s.EvictList.EvictNext; v != &s.EvictList; v = v.EvictNext {
-		idx := v.Hash % uint64(len(bucket))
+	for i := range s.Bucket {
+		sentinel := &s.Bucket[i]
+		if sentinel.HashNext == nil {
+			continue
+		}
 
-		n := &bucket[idx]
-		lazyInitBucket(n)
+		var order []*node
+		for v := sentinel.HashNext; v != sentinel; v = v.HashNext {
+			order = append(order, v)
+		}
 
-		v.HashPrev = n
-		v.HashNext = v.HashPrev.HashNext
-		v.HashNext.HashPrev = v
-		v.HashPrev.HashNext = v
+		for _, v := range order {
+			idx := v.Hash % uint64(len(bucket))
+
+			n := &bucket[idx]
+			lazyInitBucket(n)
+
+			v.HashPrev = n
+			v.HashNext = v.HashPrev.HashNext
+			v.HashNext.HashPrev = v
+			v.HashPrev.HashNext = v
+		}
 	}
 
 	s.Bucket = bucket
@@ -172,8 +188,11 @@ func (s *store) Resize() {
 
 // cleanup removes expired entries from the store.
 func (s *store) Cleanup() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	s.EvictLock.Lock()
+	defer s.EvictLock.Unlock()
 
 	for v := s.EvictList.EvictNext; v != &s.EvictList; {
 		n := v.EvictNext
@@ -186,8 +205,11 @@ func (s *store) Cleanup() {
 
 // evict removes entries from the store based on the eviction policy.
 func (s *store) Evict() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	s.EvictLock.Lock()
+	defer s.EvictLock.Unlock()
 
 	if s.MaxCost == 0 {
 		return true
@@ -242,8 +264,8 @@ func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
 
 // Set adds or updates a key-value pair in the store with locking.
 func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	v, _, _ := s.lookup(key)
 	if v != nil {
@@ -273,8 +295,8 @@ func deleteNode(s *store, v *node) {
 
 // Delete removes a key-value pair from the store with locking.
 func (s *store) Delete(key []byte) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	v, _, _ := s.lookup(key)
 	if v != nil {
@@ -289,8 +311,8 @@ func (s *store) Delete(key []byte) bool {
 // UpdateInPlace retrieves a value from the store, processes it using the provided function,
 // and then sets the result back into the store with the same key.
 func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, error), ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	v, _, _ := s.lookup(key)
 	if v == nil {
@@ -323,8 +345,8 @@ func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, erro
 // Memorize attempts to retrieve a value from the store. If the retrieval fails,
 // it sets the result of the factory function into the store and returns that result.
 func (s *store) Memorize(key []byte, factory func() ([]byte, error), ttl time.Duration) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	v, _, _ := s.lookup(key)
 	if v != nil && v.IsValid() {

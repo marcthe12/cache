@@ -76,8 +76,8 @@ func (d *db) Start() {
 
 // SetConfig applies configuration options to the db.
 func (d *db) SetConfig(options ...Option) error {
-	d.Store.mu.Lock()
-	defer d.Store.mu.Unlock()
+	d.Store.Lock.Lock()
+	defer d.Store.Lock.Unlock()
 
 	for _, opt := range options {
 		if err := opt(d); err != nil {

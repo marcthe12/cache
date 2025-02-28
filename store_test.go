@@ -448,7 +448,89 @@ func BenchmarkStoreGet(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreGetParallel(b *testing.B) {
+	policy := map[string]EvictionPolicyType{
+		"None": PolicyNone,
+		"FIFO": PolicyFIFO,
+		"LRU":  PolicyLRU,
+		"LFU":  PolicyLFU,
+		"LTR":  PolicyLTR,
+	}
+	for k, v := range policy {
+		b.Run(k, func(b *testing.B) {
+			for n := 1; n <= 10000; n *= 10 {
+				b.Run(strconv.Itoa(n), func(b *testing.B) {
+					want := setupTestStore(b)
+
+					if err := want.Policy.SetPolicy(v); err != nil {
+						b.Fatalf("unexpected error: %v", err)
+					}
+
+					for i := range n - 1 {
+						buf := make([]byte, 8)
+						binary.LittleEndian.PutUint64(buf, uint64(i))
+						want.Set(buf, buf, 0)
+					}
+
+					key := []byte("Key")
+					want.Set(key, []byte("Store"), 0)
+					b.ReportAllocs()
+
+					b.ResetTimer()
+
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							want.Get(key)
+						}
+					})
+				})
+			}
+		})
+	}
+}
+
 func BenchmarkStoreSet(b *testing.B) {
+	policy := map[string]EvictionPolicyType{
+		"None": PolicyNone,
+		"FIFO": PolicyFIFO,
+		"LRU":  PolicyLRU,
+		"LFU":  PolicyLFU,
+		"LTR":  PolicyLTR,
+	}
+	for k, v := range policy {
+		b.Run(k, func(b *testing.B) {
+			for n := 1; n <= 10000; n *= 10 {
+				b.Run(strconv.Itoa(n), func(b *testing.B) {
+					want := setupTestStore(b)
+
+					if err := want.Policy.SetPolicy(v); err != nil {
+						b.Fatalf("unexpected error: %v", err)
+					}
+
+					for i := range n - 1 {
+						buf := make([]byte, 8)
+						binary.LittleEndian.PutUint64(buf, uint64(i))
+						want.Set(buf, buf, 0)
+					}
+
+					key := []byte("Key")
+					store := []byte("Store")
+
+					b.ReportAllocs()
+					b.ResetTimer()
+
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							want.Set(key, store, 0)
+						}
+					})
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkStoreSetParallel(b *testing.B) {
 	policy := map[string]EvictionPolicyType{
 		"None": PolicyNone,
 		"FIFO": PolicyFIFO,

@@ -322,7 +322,7 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 	}
 }
 
-func BenchmarkEncoder_EncodeStore(b *testing.B) {
+func BenchmarkStoreLoadSnapshot(b *testing.B) {
 	file, err := os.CreateTemp(b.TempDir(), "benchmark_test_")
 	if err != nil {
 		b.Fatal(err)
@@ -363,7 +363,7 @@ func BenchmarkEncoder_EncodeStore(b *testing.B) {
 	}
 }
 
-func BenchmarkDecoder_DecodeStore(b *testing.B) {
+func BenchmarkStoreLoadSnapsot(b *testing.B) {
 	file, err := os.CreateTemp(b.TempDir(), "benchmark_test_")
 
 	if err != nil {

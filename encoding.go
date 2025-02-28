@@ -224,15 +224,15 @@ func (d *decoder) DecodeStore(s *store) error {
 		v.EvictNext.EvictPrev = v
 		v.EvictPrev.EvictNext = v
 
-		s.Cost = s.Cost + uint64(len(v.Key)) + uint64(len(v.Value))
+		s.Cost = s.Cost + v.Cost()
 	}
 
 	return nil
 }
 
 func (s *store) Snapshot(w io.WriteSeeker) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
 	if _, err := w.Seek(0, io.SeekStart); err != nil {
 		return err

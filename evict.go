@@ -2,6 +2,7 @@ package cache
 
 import (
 	"errors"
+	"sync"
 )
 
 // EvictionPolicyType defines the type of eviction policy.
@@ -27,8 +28,9 @@ type evictionStrategies interface {
 // evictionPolicy struct holds the eviction strategy and its type.
 type evictionPolicy struct {
 	evictionStrategies
-	Type  EvictionPolicyType
-	evict *node
+	Type     EvictionPolicyType
+	Sentinel *node
+	ListLock *sync.RWMutex
 }
 
 // pushEvict adds a node to the eviction list.
@@ -43,19 +45,19 @@ func pushEvict(node *node, sentinnel *node) {
 func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 	store := map[EvictionPolicyType]func() evictionStrategies{
 		PolicyNone: func() evictionStrategies {
-			return fifoPolicy{evict: e.evict, shouldEvict: false}
+			return fifoPolicy{List: e.Sentinel, ShouldEvict: false, Lock: e.ListLock}
 		},
 		PolicyFIFO: func() evictionStrategies {
-			return fifoPolicy{evict: e.evict, shouldEvict: true}
+			return fifoPolicy{List: e.Sentinel, Lock: e.ListLock}
 		},
 		PolicyLRU: func() evictionStrategies {
-			return lruPolicy{evict: e.evict}
+			return lruPolicy{List: e.Sentinel, Lock: e.ListLock}
 		},
 		PolicyLFU: func() evictionStrategies {
-			return lfuPolicy{evict: e.evict}
+			return lfuPolicy{List: e.Sentinel, Lock: e.ListLock}
 		},
 		PolicyLTR: func() evictionStrategies {
-			return ltrPolicy{evict: e.evict}
+			return ltrPolicy{List: e.Sentinel, EvictZero: true, Lock: e.ListLock}
 		},
 	}
 
@@ -75,13 +77,17 @@ type evictOrderedPolicy interface {
 }
 
 type fifoPolicy struct {
-	evict       *node
-	shouldEvict bool
+	List        *node
+	Lock        *sync.RWMutex
+	ShouldEvict bool
 }
 
 // OnInsert adds a node to the eviction list.
 func (s fifoPolicy) OnInsert(n *node) {
-	pushEvict(n, s.evict)
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	pushEvict(n, s.List)
 }
 
 // OnAccess is a no-op for fifoPolicy.
@@ -96,25 +102,29 @@ func (fifoPolicy) OnUpdate(n *node) {
 
 // Evict returns the oldest node for fifoPolicy.
 func (s fifoPolicy) Evict() *node {
-	if s.shouldEvict && s.evict.EvictPrev != s.evict {
-		return s.evict.EvictPrev
+	if s.ShouldEvict && s.List.EvictPrev != s.List {
+		return s.List.EvictPrev
 	} else {
 		return nil
 	}
 }
 
 func (s fifoPolicy) getEvict() *node {
-	return s.evict
+	return s.List
 }
 
 // lruPolicy struct represents the Least Recently Used eviction policy.
 type lruPolicy struct {
-	evict *node
+	List *node
+	Lock *sync.RWMutex
 }
 
 // OnInsert adds a node to the eviction list.
 func (s lruPolicy) OnInsert(n *node) {
-	pushEvict(n, s.evict)
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	pushEvict(n, s.List)
 }
 
 // OnUpdate moves the accessed node to the front of the eviction list.
@@ -124,6 +134,9 @@ func (s lruPolicy) OnUpdate(n *node) {
 
 // OnAccess moves the accessed node to the front of the eviction list.
 func (s lruPolicy) OnAccess(n *node) {
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
 	n.EvictNext.EvictPrev = n.EvictPrev
 	n.EvictPrev.EvictNext = n.EvictNext
 	s.OnInsert(n)
@@ -131,25 +144,29 @@ func (s lruPolicy) OnAccess(n *node) {
 
 // Evict returns the least recently used node for lruPolicy.
 func (s lruPolicy) Evict() *node {
-	if s.evict.EvictPrev != s.evict {
-		return s.evict.EvictPrev
+	if s.List.EvictPrev != s.List {
+		return s.List.EvictPrev
 	} else {
 		return nil
 	}
 }
 
 func (s lruPolicy) getEvict() *node {
-	return s.evict
+	return s.List
 }
 
 // lfuPolicy struct represents the Least Frequently Used eviction policy.
 type lfuPolicy struct {
-	evict *node
+	List *node
+	Lock *sync.RWMutex
 }
 
 // OnInsert adds a node to the eviction list and initializes its access count.
 func (s lfuPolicy) OnInsert(n *node) {
-	pushEvict(n, s.evict)
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	pushEvict(n, s.List)
 }
 
 // OnUpdate increments the access count of the node and reorders the list.
@@ -159,9 +176,12 @@ func (s lfuPolicy) OnUpdate(n *node) {
 
 // OnAccess increments the access count of the node and reorders the list.
 func (s lfuPolicy) OnAccess(n *node) {
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
 	n.Access++
 
-	for v := n.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
+	for v := n.EvictPrev; v.EvictPrev != s.List; v = v.EvictPrev {
 		if v.Access <= n.Access {
 			n.EvictNext.EvictPrev = n.EvictPrev
 			n.EvictPrev.EvictNext = n.EvictNext
@@ -178,7 +198,7 @@ func (s lfuPolicy) OnAccess(n *node) {
 	n.EvictNext.EvictPrev = n.EvictPrev
 	n.EvictPrev.EvictNext = n.EvictNext
 
-	n.EvictPrev = s.evict
+	n.EvictPrev = s.List
 	n.EvictNext = n.EvictPrev.EvictNext
 	n.EvictNext.EvictPrev = n
 	n.EvictPrev.EvictNext = n
@@ -186,29 +206,33 @@ func (s lfuPolicy) OnAccess(n *node) {
 
 // Evict returns the least frequently used node for LFU.
 func (s lfuPolicy) Evict() *node {
-	if s.evict.EvictPrev != s.evict {
-		return s.evict.EvictPrev
+	if s.List.EvictPrev != s.List {
+		return s.List.EvictPrev
 	} else {
 		return nil
 	}
 }
 
-func (s ltrPolicy) getEvict() *node {
-	return s.evict
+func (s lfuPolicy) getEvict() *node {
+	return s.List
 }
 
 // ltrPolicy struct represents the Least Remaining Time eviction policy.
 type ltrPolicy struct {
-	evict     *node
-	evictZero bool
+	List      *node
+	Lock      *sync.RWMutex
+	EvictZero bool
 }
 
 // OnInsert adds a node to the eviction list based on its TTL (Time To Live).
 // It places the node in the correct position in the list based on TTL.
 func (s ltrPolicy) OnInsert(n *node) {
-	pushEvict(n, s.evict)
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
 
-	s.OnUpdate(n)
+	pushEvict(n, s.List)
+
+	s.update(n)
 }
 
 // OnAccess is a no-op for ltrPolicy.
@@ -220,11 +244,18 @@ func (s ltrPolicy) OnAccess(n *node) {
 // OnUpdate updates the position of the node in the eviction list based on its TTL.
 // It reorders the list to maintain the correct order based on TTL.
 func (s ltrPolicy) OnUpdate(n *node) {
+	s.Lock.Lock()
+	defer s.Lock.Unlock()
+
+	s.update(n)
+}
+
+func (s ltrPolicy) update(n *node) {
 	if n.TTL() == 0 {
 		return
 	}
 
-	for v := n.EvictPrev; v.EvictPrev != s.evict; v = v.EvictPrev {
+	for v := n.EvictPrev; v.EvictPrev != s.List; v = v.EvictPrev {
 		if v.TTL() == 0 {
 			continue
 		}
@@ -242,7 +273,7 @@ func (s ltrPolicy) OnUpdate(n *node) {
 		}
 	}
 
-	for v := n.EvictNext; v.EvictNext != s.evict; v = v.EvictNext {
+	for v := n.EvictNext; v.EvictNext != s.List; v = v.EvictNext {
 		if v.TTL() == 0 {
 			continue
 		}
@@ -264,13 +295,13 @@ func (s ltrPolicy) OnUpdate(n *node) {
 // Evict returns the node with the least remaining time to live for ltrPolicy.
 // It returns the node at the end of the eviction list.
 func (s ltrPolicy) Evict() *node {
-	if s.evict.EvictPrev != s.evict && (s.evict.EvictPrev.TTL() != 0 || s.evictZero) {
-		return s.evict.EvictPrev
+	if s.List.EvictPrev != s.List && (s.List.EvictPrev.TTL() != 0 || s.EvictZero) {
+		return s.List.EvictPrev
 	}
 
 	return nil
 }
 
-func (s lfuPolicy) getEvict() *node {
-	return s.evict
+func (s ltrPolicy) getEvict() *node {
+	return s.List
 }
