@@ -131,6 +131,105 @@ func TestDBDelete(t *testing.T) {
 	})
 }
 
+func TestDBUpdateInPlace(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Exists", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestDB[string, string](t)
+
+		want := "Value"
+		store.Set("Key", "Initial", 1*time.Hour)
+
+		processFunc := func(v string) (string, error) {
+			return want, nil
+		}
+
+		if err := store.UpdateInPlace("Key", processFunc, 1*time.Hour); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got, _, err := store.GetValue("Key")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if want != got {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("Not Exists", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestDB[string, string](t)
+
+		want := "Value"
+
+		processFunc := func(v string) (string, error) {
+			return want, nil
+		}
+
+		if err := store.UpdateInPlace("Key", processFunc, 1*time.Hour); !errors.Is(err, ErrKeyNotFound) {
+			t.Fatalf("expected error: %v, got: %v", ErrKeyNotFound, err)
+		}
+	})
+}
+
+func TestDBMemoize(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Cache Miss", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestDB[string, string](t)
+
+		want := "Value"
+
+		factoryFunc := func() (string, error) {
+			return want, nil
+		}
+
+		got, err := store.Memorize("Key", factoryFunc, 1*time.Hour)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "Value" {
+			t.Fatalf("expected: %v, got: %v", "Value", got)
+		}
+
+		got, _, err = store.GetValue("Key")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if want != got {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("Cache Hit", func(t *testing.T) {
+		t.Parallel()
+
+		store := setupTestDB[string, string](t)
+
+		want := "NewValue"
+
+		store.Set("Key", "Value", 1*time.Hour)
+
+		factoryFunc := func() (string, error) {
+			return want, nil
+		}
+
+		got, err := store.Memorize("Key", factoryFunc, 1*time.Hour)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "Value" {
+			t.Fatalf("expected: %v, got: %v", "Value", got)
+		}
+	})
+}
+
 func BenchmarkDBGet(b *testing.B) {
 	for n := 1; n <= 10000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {

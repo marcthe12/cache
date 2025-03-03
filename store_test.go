@@ -18,6 +18,107 @@ func setupTestStore(tb testing.TB) *store {
 	return store
 }
 
+func TestNodeIsValid(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *node
+		isValid bool
+	}{
+		{
+			name:    "Valid node with non-zero expiration",
+			node:    &node{Key: []byte("key1"), Value: []byte("value1"), Expiration: time.Now().Add(10 * time.Minute)},
+			isValid: true,
+		},
+		{
+			name:    "Valid node with zero expiration",
+			node:    &node{Key: []byte("key2"), Value: []byte("value2"), Expiration: time.Time{}},
+			isValid: true,
+		},
+		{
+			name:    "Expired node",
+			node:    &node{Key: []byte("key3"), Value: []byte("value3"), Expiration: time.Now().Add(-1 * time.Minute)},
+			isValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.node.IsValid(); got != tt.isValid {
+				t.Errorf("IsValid() = %v, want %v", got, tt.isValid)
+			}
+		})
+	}
+}
+
+func TestNodeTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		node *node
+		ttl  time.Duration
+	}{
+		{
+			name: "Node with non-zero expiration",
+			node: &node{Key: []byte("key1"), Value: []byte("value1"), Expiration: time.Now().Add(10 * time.Minute)},
+			ttl:  10 * time.Minute,
+		},
+		{
+			name: "Node with zero expiration",
+			node: &node{Key: []byte("key2"), Value: []byte("value2"), Expiration: time.Time{}},
+			ttl:  0,
+		},
+		{
+			name: "Expired node",
+			node: &node{Key: []byte("key3"), Value: []byte("value3"), Expiration: time.Now().Add(-1 * time.Minute)},
+			ttl:  -1 * time.Minute, // Should be negative or 0, depending on the implementation
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.node.TTL().Round(time.Second); got != tt.ttl {
+				t.Errorf("TTL() = %v, want %v", got, tt.ttl)
+			}
+		})
+	}
+}
+
+func TestNodeCost(t *testing.T) {
+	tests := []struct {
+		name string
+		node *node
+		cost uint64
+	}{
+		{
+			name: "Node with non-empty Key and Value",
+			node: &node{Key: []byte("key1"), Value: []byte("value1")},
+			cost: 10,
+		},
+		{
+			name: "Node with empty Key and Value",
+			node: &node{Key: []byte(""), Value: []byte("")},
+			cost: 0,
+		},
+		{
+			name: "Node with non-empty Key and empty Value",
+			node: &node{Key: []byte("key1"), Value: []byte("")},
+			cost: 4,
+		},
+		{
+			name: "Node with empty Key and non-empty Value",
+			node: &node{Key: []byte(""), Value: []byte("value1")},
+			cost: 6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.node.Cost(); got != tt.cost {
+				t.Errorf("Cost() = %v, want %v", got, tt.cost)
+			}
+		})
+	}
+}
+
 func TestStoreGetSet(t *testing.T) {
 	t.Parallel()
 

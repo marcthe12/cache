@@ -41,6 +41,8 @@ func pushEvict(node *node, sentinnel *node) {
 	node.EvictPrev.EvictNext = node
 }
 
+var ErrInvalidPolicy = errors.New("invalid policy")
+
 // SetPolicy sets the eviction policy based on the given type.
 func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 	store := map[EvictionPolicyType]func() evictionStrategies{
@@ -63,7 +65,7 @@ func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 
 	factory, ok := store[y]
 	if !ok {
-		return errors.New("invalid policy")
+		return ErrInvalidPolicy
 	}
 
 	e.evictionStrategies = factory()

@@ -498,8 +498,8 @@ func TestPolicyEvict(t *testing.T) {
 						policy.OnInsert(nodes[0])
 						policy.OnInsert(nodes[1])
 
-						nodes[0].Expiration = time.Now().Add(20 * time.Minute)
-						policy.OnUpdate(nodes[0])
+						nodes[1].Expiration = time.Now().Add(20 * time.Minute)
+						policy.OnUpdate(nodes[1])
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[1]
@@ -542,5 +542,129 @@ func TestPolicyEvict(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestSetPolicy(t *testing.T) {
+	t.Parallel()
+
+	type test struct {
+		name         string
+		policyType   EvictionPolicyType
+		expectedType EvictionPolicyType
+		expectedErr  error
+	}
+
+	tests := []test{
+		{
+			name:         "PolicyNone",
+			policyType:   PolicyNone,
+			expectedType: PolicyNone,
+			expectedErr:  nil,
+		},
+		{
+			name:         "PolicyFIFO",
+			policyType:   PolicyFIFO,
+			expectedType: PolicyFIFO,
+			expectedErr:  nil,
+		},
+		{
+			name:         "PolicyLRU",
+			policyType:   PolicyLRU,
+			expectedType: PolicyLRU,
+			expectedErr:  nil,
+		},
+		{
+			name:         "PolicyLFU",
+			policyType:   PolicyLFU,
+			expectedType: PolicyLFU,
+			expectedErr:  nil,
+		},
+		{
+			name:         "PolicyLTR",
+			policyType:   PolicyLTR,
+			expectedType: PolicyLTR,
+			expectedErr:  nil,
+		},
+		{
+			name:         "InvalidPolicy",
+			policyType:   EvictionPolicyType(999), // Invalid policy type
+			expectedType: PolicyNone,              // Default type
+			expectedErr:  ErrInvalidPolicy,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			policy := &evictionPolicy{
+				Sentinel: createSentinel(t),
+				ListLock: &sync.RWMutex{},
+			}
+
+			err := policy.SetPolicy(tt.policyType)
+			if err != tt.expectedErr {
+				t.Errorf("expected error %v, got %v", tt.expectedErr, err)
+			}
+
+			if policy.Type != tt.expectedType {
+				t.Errorf("expected policy type %v, got %v", tt.expectedType, policy.Type)
+			}
+		})
+	}
+}
+
+func TestSetPolicyMultipleTimes(t *testing.T) {
+	t.Parallel()
+
+	policy := &evictionPolicy{
+		Sentinel: createSentinel(t),
+		ListLock: &sync.RWMutex{},
+	}
+
+	// Set policy to FIFO
+	err := policy.SetPolicy(PolicyFIFO)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if policy.Type != PolicyFIFO {
+		t.Errorf("expected policy type %v, got %v", PolicyFIFO, policy.Type)
+	}
+
+	// Set policy to LRU
+	err = policy.SetPolicy(PolicyLRU)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if policy.Type != PolicyLRU {
+		t.Errorf("expected policy type %v, got %v", PolicyLRU, policy.Type)
+	}
+
+	// Set policy to LFU
+	err = policy.SetPolicy(PolicyLFU)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if policy.Type != PolicyLFU {
+		t.Errorf("expected policy type %v, got %v", PolicyLFU, policy.Type)
+	}
+
+	// Set policy to LTR
+	err = policy.SetPolicy(PolicyLTR)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if policy.Type != PolicyLTR {
+		t.Errorf("expected policy type %v, got %v", PolicyLTR, policy.Type)
+	}
+
+	// Set policy to None
+	err = policy.SetPolicy(PolicyNone)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if policy.Type != PolicyNone {
+		t.Errorf("expected policy type %v, got %v", PolicyNone, policy.Type)
 	}
 }
