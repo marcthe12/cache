@@ -317,6 +317,7 @@ func TestStoreEvict(t *testing.T) {
 		if err := store.Policy.SetPolicy(PolicyFIFO); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		store.MaxCost = 5
 
 		store.Set([]byte("1"), []byte("1"), 0)

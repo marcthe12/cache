@@ -136,8 +136,8 @@ func (s *store) lookup(key []byte) (*node, uint64, uint64) {
 
 // Get retrieves a value from the store by key with locking.
 func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
-	s.Lock.Lock()
-	defer s.Lock.Unlock()
+	s.Lock.RLock()
+	defer s.Lock.RUnlock()
 
 	v, _, _ := s.lookup(key)
 	if v != nil {

@@ -69,257 +69,6 @@ func checkOrder(tb testing.TB, policy evictOrderedPolicy, expected []*node) {
 	}
 }
 
-func TestFIFOPolicy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("OnInsert", func(t *testing.T) {
-		t.Parallel()
-
-		policy := fifoPolicy{List: createSentinel(t), ShouldEvict: true, Lock: &sync.RWMutex{}}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n1)
-		policy.OnInsert(n0)
-
-		checkOrder(t, policy, []*node{n0, n1})
-	})
-
-	t.Run("Evict", func(t *testing.T) {
-		t.Parallel()
-
-		t.Run("Evict", func(t *testing.T) {
-			t.Parallel()
-
-			policy := fifoPolicy{List: createSentinel(t), ShouldEvict: true, Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnInsert(n1)
-
-			evictedNode := policy.Evict()
-			if n0 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n0, evictedNode)
-			}
-		})
-
-		t.Run("Evict noEvict", func(t *testing.T) {
-			t.Parallel()
-
-			policy := fifoPolicy{List: createSentinel(t), ShouldEvict: false, Lock: &sync.RWMutex{}}
-
-			policy.OnInsert(&node{})
-
-			if policy.Evict() != nil {
-				t.Errorf("expected nil, got %#v", policy.Evict())
-			}
-		})
-
-		t.Run("Empty List", func(t *testing.T) {
-			t.Parallel()
-
-			policy := fifoPolicy{List: createSentinel(t), ShouldEvict: true, Lock: &sync.RWMutex{}}
-			if policy.Evict() != nil {
-				t.Errorf("expected nil, got %#v", policy.Evict())
-			}
-		})
-	})
-}
-
-func TestLRUPolicy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("OnInsert", func(t *testing.T) {
-		t.Parallel()
-
-		policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		checkOrder(t, policy, []*node{n1, n0})
-	})
-
-	t.Run("OnAccess", func(t *testing.T) {
-		t.Parallel()
-
-		policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		policy.OnAccess(n0)
-
-		checkOrder(t, policy, []*node{n0, n1})
-	})
-
-	t.Run("Evict", func(t *testing.T) {
-		t.Parallel()
-
-		t.Run("Evict", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnInsert(n1)
-
-			evictedNode := policy.Evict()
-			if n0 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n0, evictedNode)
-			}
-		})
-
-		t.Run("OnAccess End", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnInsert(n1)
-
-			policy.OnAccess(n0)
-
-			evictedNode := policy.Evict()
-			if n1 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n1, evictedNode)
-			}
-		})
-
-		t.Run("OnAccess Interleaved", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnAccess(n0)
-			policy.OnInsert(n1)
-
-			evictedNode := policy.Evict()
-
-			if n0 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n0, evictedNode)
-			}
-		})
-
-		t.Run("Empty", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lruPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-			if policy.Evict() != nil {
-				t.Errorf("expected nil, got %#v", policy.Evict())
-			}
-		})
-	})
-}
-
-func TestLFUPolicy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("OnInsert", func(t *testing.T) {
-		t.Parallel()
-
-		policy := lfuPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		checkOrder(t, policy, []*node{n1, n0})
-	})
-
-	t.Run("OnAccess", func(t *testing.T) {
-		t.Parallel()
-
-		policy := lfuPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-		n0 := &node{Key: []byte("0")}
-		n1 := &node{Key: []byte("1")}
-
-		policy.OnInsert(n0)
-		policy.OnInsert(n1)
-
-		policy.OnAccess(n0)
-
-		checkOrder(t, policy, []*node{n0, n1})
-	})
-
-	t.Run("Evict", func(t *testing.T) {
-		t.Parallel()
-
-		t.Run("Evict", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lfuPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnInsert(n1)
-
-			policy.OnAccess(n0)
-
-			evictedNode := policy.Evict()
-			if n1 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n1, evictedNode)
-			}
-		})
-
-		t.Run("Evict After Multiple Accesses", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lfuPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-
-			n0 := &node{Key: []byte("0")}
-			n1 := &node{Key: []byte("1")}
-
-			policy.OnInsert(n0)
-			policy.OnInsert(n1)
-
-			policy.OnAccess(n0)
-
-			policy.OnAccess(n1)
-			policy.OnAccess(n1)
-
-			evictedNode := policy.Evict()
-
-			if n0 != evictedNode {
-				t.Errorf("expected %#v, got %#v", n0, evictedNode)
-			}
-		})
-
-		t.Run("Empty List", func(t *testing.T) {
-			t.Parallel()
-
-			policy := lfuPolicy{List: createSentinel(t), Lock: &sync.RWMutex{}}
-			if policy.Evict() != nil {
-				t.Errorf("expected nil, got %#v", policy.Evict())
-			}
-		})
-	})
-}
-
 func TestPolicyHooks(t *testing.T) {
 	t.Parallel()
 
@@ -336,6 +85,87 @@ func TestPolicyHooks(t *testing.T) {
 		policyType EvictionPolicyType
 		tests      []test
 	}{
+		{
+			name:       "FIFO",
+			policyType: PolicyFIFO,
+			tests: []test{
+				{
+					name:       "OnInsert",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+					},
+					expected: func(nodes []*node) []*node {
+						return []*node{nodes[1], nodes[0]}
+					},
+				},
+			},
+		},
+		{
+			name:       "LRU",
+			policyType: PolicyLRU,
+			tests: []test{
+				{
+					name:       "OnInsert",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+					},
+					expected: func(nodes []*node) []*node {
+						return []*node{nodes[1], nodes[0]}
+					},
+				},
+				{
+					name:       "OnAccess",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+						policy.OnAccess(nodes[0])
+					},
+					expected: func(nodes []*node) []*node {
+						return []*node{nodes[0], nodes[1]}
+					},
+				},
+			},
+		},
+		{
+			name:       "LFU",
+			policyType: PolicyLFU,
+			tests: []test{
+				{
+					name:       "OnInsert",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+					},
+					expected: func(nodes []*node) []*node {
+						return []*node{nodes[1], nodes[0]}
+					},
+				},
+				{
+					name:       "OnAccess",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+						policy.OnAccess(nodes[0])
+					},
+					expected: func(nodes []*node) []*node {
+						return []*node{nodes[0], nodes[1]}
+					},
+				},
+			},
+		},
 		{
 			name:       "LTR",
 			policyType: PolicyLTR,
@@ -446,11 +276,162 @@ func TestPolicyEvict(t *testing.T) {
 		tests      []test
 	}{
 		{
+			name:       "FIFO",
+			policyType: PolicyFIFO,
+			tests: []test{
+				{
+					name:       "",
+					flag:       true,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[0]
+					},
+				},
+				{
+					name:       "Policy None",
+					flag:       false,
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nil
+					},
+				},
+				{
+					name:       "Empty List",
+					flag:       true,
+					numOfNodes: 0,
+					actions:    func(policy evictOrderedPolicy, nodes []*node) {},
+					expected: func(nodes []*node) *node {
+						return nil
+					},
+				},
+			},
+		},
+		{
+			name:       "LFU",
+			policyType: PolicyLFU,
+			tests: []test{
+				{
+					name:       "",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[0]
+					},
+				},
+				{
+					name:       "Access",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+						policy.OnAccess(nodes[0])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[1]
+					},
+				},
+				{
+					name:       "Access Interleved",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+
+						policy.OnAccess(nodes[0])
+
+						policy.OnInsert(nodes[1])
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[0]
+					},
+				},
+				{
+					name:       "Empty List",
+					numOfNodes: 0,
+					actions:    func(policy evictOrderedPolicy, nodes []*node) {},
+					expected: func(nodes []*node) *node {
+						return nil
+					},
+				},
+			},
+		},
+		{
+			name:       "LRU",
+			policyType: PolicyLRU,
+			tests: []test{
+				{
+					name:       "",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[0]
+					},
+				},
+				{
+					name:       "Access",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+						policy.OnAccess(nodes[0])
+
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[1]
+					},
+				},
+				{
+					name:       "Multiple Access",
+					numOfNodes: 2,
+					actions: func(policy evictOrderedPolicy, nodes []*node) {
+						policy.OnInsert(nodes[0])
+						policy.OnInsert(nodes[1])
+
+						policy.OnAccess(nodes[0])
+
+						policy.OnAccess(nodes[1])
+						policy.OnAccess(nodes[1])
+					},
+					expected: func(nodes []*node) *node {
+						return nodes[0]
+					},
+				},
+				{
+					name:       "Empty List",
+					numOfNodes: 0,
+					actions:    func(policy evictOrderedPolicy, nodes []*node) {},
+					expected: func(nodes []*node) *node {
+						return nil
+					},
+				},
+			},
+		},
+		{
 			name:       "LTR",
 			policyType: PolicyLTR,
 			tests: []test{
 				{
-					name:       "Evict",
+					name:       "",
 					flag:       true,
 					numOfNodes: 2,
 					actions: func(policy evictOrderedPolicy, nodes []*node) {
@@ -556,7 +537,7 @@ func TestPolicyEvict(t *testing.T) {
 
 					evictedNode := policy.Evict()
 					if evictedNode != tt.expected(nodes) {
-						t.Errorf("expected %#v, got %#v", tt.expected(nodes), evictedNode)
+						t.Errorf("expected\n %#v\n got %#v", tt.expected(nodes), evictedNode)
 					}
 				})
 			}

@@ -48,7 +48,7 @@ func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 			return fifoPolicy{List: e.Sentinel, ShouldEvict: false, Lock: e.ListLock}
 		},
 		PolicyFIFO: func() evictionStrategies {
-			return fifoPolicy{List: e.Sentinel, Lock: e.ListLock}
+			return fifoPolicy{List: e.Sentinel, ShouldEvict: true, Lock: e.ListLock}
 		},
 		PolicyLRU: func() evictionStrategies {
 			return lruPolicy{List: e.Sentinel, Lock: e.ListLock}
@@ -67,6 +67,7 @@ func (e *evictionPolicy) SetPolicy(y EvictionPolicyType) error {
 	}
 
 	e.evictionStrategies = factory()
+	e.Type = y
 
 	return nil
 }
@@ -139,7 +140,8 @@ func (s lruPolicy) OnAccess(n *node) {
 
 	n.EvictNext.EvictPrev = n.EvictPrev
 	n.EvictPrev.EvictNext = n.EvictNext
-	s.OnInsert(n)
+
+	pushEvict(n, s.List)
 }
 
 // Evict returns the least recently used node for lruPolicy.
