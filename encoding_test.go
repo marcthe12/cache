@@ -10,6 +10,8 @@ import (
 )
 
 func TestDecodeUint64Error(t *testing.T) {
+	t.Parallel()
+
 	buf := bytes.NewReader([]byte{0xFF})
 
 	decoder := newDecoder(buf)
@@ -21,6 +23,8 @@ func TestDecodeUint64Error(t *testing.T) {
 }
 
 func TestEncodeDecodeUint64(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		value uint64
@@ -32,6 +36,8 @@ func TestEncodeDecodeUint64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
@@ -58,6 +64,8 @@ func TestEncodeDecodeUint64(t *testing.T) {
 }
 
 func TestEncodeDecodeTime(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		value time.Time
@@ -69,12 +77,15 @@ func TestEncodeDecodeTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
 			if err := e.EncodeTime(tt.value); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+
 			if err := e.Flush(); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -89,18 +100,20 @@ func TestEncodeDecodeTime(t *testing.T) {
 			if tt.value.Unix() != decodedValue.Unix() {
 				t.Errorf("expected %v, got %v", tt.value, decodedValue)
 			}
-
 		})
 	}
 }
 
 func TestDecodeBytesError(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 	e := newEncoder(&buf)
 
 	if err := e.EncodeBytes([]byte("DEADBEEF")); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
 	if err := e.Flush(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -113,6 +126,8 @@ func TestDecodeBytesError(t *testing.T) {
 }
 
 func TestEncodeDecodeBytes(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		value []byte
@@ -124,12 +139,15 @@ func TestEncodeDecodeBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
 			if err := e.EncodeBytes(tt.value); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
+
 			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -149,6 +167,8 @@ func TestEncodeDecodeBytes(t *testing.T) {
 }
 
 func TestEncodeDecodeNode(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		value *node
@@ -187,6 +207,8 @@ func TestEncodeDecodeNode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
@@ -208,15 +230,21 @@ func TestEncodeDecodeNode(t *testing.T) {
 			if tt.value.Hash != decodedValue.Hash {
 				t.Errorf("expected %v, got %v", tt.value.Hash, decodedValue.Hash)
 			}
-			if !tt.value.Expiration.Equal(decodedValue.Expiration) && tt.value.Expiration.Sub(decodedValue.Expiration) > time.Second {
-				t.Errorf("expected %v to be within %v of %v", decodedValue.Expiration, time.Second, tt.value.Expiration)
+
+			if !tt.value.Expiration.Equal(decodedValue.Expiration) &&
+				tt.value.Expiration.Sub(decodedValue.Expiration) > time.Second {
+				t.Errorf("expected %v to be within %v of %v",
+					decodedValue.Expiration, time.Second, tt.value.Expiration)
 			}
+
 			if tt.value.Access != decodedValue.Access {
 				t.Errorf("expected %v, got %v", tt.value.Access, decodedValue.Access)
 			}
+
 			if !bytes.Equal(tt.value.Key, decodedValue.Key) {
 				t.Errorf("expected %v, got %v", tt.value.Key, decodedValue.Key)
 			}
+
 			if !bytes.Equal(tt.value.Value, decodedValue.Value) {
 				t.Errorf("expected %v, got %v", tt.value.Value, decodedValue.Value)
 			}
@@ -225,6 +253,8 @@ func TestEncodeDecodeNode(t *testing.T) {
 }
 
 func TestEncodeDecodeStrorage(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		store   map[string]string
@@ -264,6 +294,8 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 			e := newEncoder(&buf)
 
@@ -281,6 +313,7 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 			if err := e.EncodeStore(want); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
+
 			if err := e.Flush(); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -295,9 +328,11 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 			if want.MaxCost != got.MaxCost {
 				t.Errorf("expected %v, got %v", want.MaxCost, got.MaxCost)
 			}
+
 			if want.Length != got.Length {
 				t.Errorf("expected %v, got %v", want.Length, got.Length)
 			}
+
 			if want.Policy.Type != got.Policy.Type {
 				t.Errorf("expected %v, got %v", want.Policy.Type, got.Policy.Type)
 			}
@@ -314,6 +349,7 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 				if !ok {
 					t.Fatalf("expected condition to be true")
 				}
+
 				if !bytes.Equal([]byte(v), gotVal) {
 					t.Fatalf("expected %v, got %v", []byte(v), gotVal)
 				}
@@ -322,14 +358,27 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 	}
 }
 
-func BenchmarkStoreLoadSnapshot(b *testing.B) {
-	file, err := os.CreateTemp(b.TempDir(), "benchmark_test_")
+func createTestFile(tb testing.TB, pattern string) *os.File {
+	tb.Helper()
+
+	file, err := os.CreateTemp(tb.TempDir(), pattern)
 	if err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	defer os.Remove(file.Name())
-	defer file.Close()
+	tb.Cleanup(func() {
+		if err := os.Remove(file.Name()); err != nil {
+			tb.Fatalf("unexpected error: %v", err)
+		}
+
+		_ = file.Close()
+	})
+
+	return file
+}
+
+func BenchmarkStoreSnapshot(b *testing.B) {
+	file := createTestFile(b, "benchmark_test_")
 
 	for n := 1; n <= 10000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
@@ -341,7 +390,7 @@ func BenchmarkStoreLoadSnapshot(b *testing.B) {
 				want.Set(buf, buf, 0)
 			}
 
-			if err = want.Snapshot(file); err != nil {
+			if err := want.Snapshot(file); err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
 
@@ -349,10 +398,9 @@ func BenchmarkStoreLoadSnapshot(b *testing.B) {
 			if err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
+
 			b.SetBytes(int64(fileInfo.Size()))
 			b.ReportAllocs()
-
-			b.ResetTimer()
 
 			for b.Loop() {
 				if err := want.Snapshot(file); err != nil {
@@ -363,15 +411,8 @@ func BenchmarkStoreLoadSnapshot(b *testing.B) {
 	}
 }
 
-func BenchmarkStoreLoadSnapsot(b *testing.B) {
-	file, err := os.CreateTemp(b.TempDir(), "benchmark_test_")
-
-	if err != nil {
-		b.Errorf("unexpected error: %v", err)
-	}
-
-	defer os.Remove(file.Name())
-	defer file.Close()
+func BenchmarkStoreLoadSnapshot(b *testing.B) {
+	file := createTestFile(b, "benchmark_test_")
 
 	for n := 1; n <= 10000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
@@ -383,19 +424,21 @@ func BenchmarkStoreLoadSnapsot(b *testing.B) {
 				want.Set(buf, buf, 0)
 			}
 
-			if err = want.Snapshot(file); err != nil {
+			if err := want.Snapshot(file); err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
+
 			fileInfo, err := file.Stat()
 			if err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
+
 			b.SetBytes(int64(fileInfo.Size()))
 			b.ReportAllocs()
 
-			b.ResetTimer()
-
 			for b.Loop() {
+				want.Clear()
+
 				if err := want.LoadSnapshot(file); err != nil {
 					b.Fatalf("unexpected error: %v", err)
 				}

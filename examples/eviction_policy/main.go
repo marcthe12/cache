@@ -2,30 +2,65 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/marcthe12/cache"
 )
 
 func main() {
 	// Create an in-memory cache with LRU eviction policy
-	db, err := cache.OpenMem[string, string](cache.WithPolicy(cache.PolicyLRU))
+	db, err := cache.OpenMem[string, string](
+		cache.WithPolicy(cache.PolicyLRU),
+		cache.WithMaxCost(30),
+		cache.SetCleanupTime(1*time.Second),
+	)
 	if err != nil {
 		fmt.Println("Error:", err)
-		return
+		os.Exit(1)
 	}
-	defer db.Close()
+
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			fmt.Println("Error:", err)
+		}
+	}()
 
 	// Set values
-	db.Set("key1", "value1", 0)
-	db.Set("key2", "value2", 0)
-	db.Set("key3", "value3", 0)
+	if err := db.Set("key1", "value1", 0); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	if err := db.Set("key2", "value2", 0); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	if err := db.Set("key3", "value3", 0); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
 
 	// Access some keys
-	db.GetValue("key1")
-	db.GetValue("key2")
+	if _, _, err := db.GetValue("key1"); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	if _, _, err := db.GetValue("key2"); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
 
 	// Add another key to trigger eviction
-	db.Set("key4", "value4", 0)
+	if err := db.Set("key4", "value4", 0); err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	time.Sleep(2 * time.Second)
 
 	// Check which keys are present
 	for _, key := range []string{"key1", "key2", "key3", "key4"} {

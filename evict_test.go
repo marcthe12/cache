@@ -30,7 +30,9 @@ func createPolicy(tb testing.TB, policyType EvictionPolicyType, flag bool) evict
 	case PolicyLFU:
 		return &lfuPolicy{List: createSentinel(tb), Lock: &sync.RWMutex{}}
 	}
+
 	tb.Fatalf("unknown policy type: %v", policyType)
+
 	return nil
 }
 
@@ -45,6 +47,7 @@ func getListOrder(tb testing.TB, evict *node) []*node {
 
 	for _, n := range order {
 		tb.Helper()
+
 		if n != n.EvictPrev.EvictNext {
 			tb.Fatalf("expected %#v, got %#v", n, n.EvictPrev.EvictNext)
 		}
@@ -286,7 +289,6 @@ func TestPolicyEvict(t *testing.T) {
 					actions: func(policy evictOrderedPolicy, nodes []*node) {
 						policy.OnInsert(nodes[0])
 						policy.OnInsert(nodes[1])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[0]
@@ -299,7 +301,6 @@ func TestPolicyEvict(t *testing.T) {
 					actions: func(policy evictOrderedPolicy, nodes []*node) {
 						policy.OnInsert(nodes[0])
 						policy.OnInsert(nodes[1])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nil
@@ -326,7 +327,6 @@ func TestPolicyEvict(t *testing.T) {
 					actions: func(policy evictOrderedPolicy, nodes []*node) {
 						policy.OnInsert(nodes[0])
 						policy.OnInsert(nodes[1])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[0]
@@ -340,7 +340,6 @@ func TestPolicyEvict(t *testing.T) {
 						policy.OnInsert(nodes[1])
 
 						policy.OnAccess(nodes[0])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[1]
@@ -380,7 +379,6 @@ func TestPolicyEvict(t *testing.T) {
 					actions: func(policy evictOrderedPolicy, nodes []*node) {
 						policy.OnInsert(nodes[0])
 						policy.OnInsert(nodes[1])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[0]
@@ -394,7 +392,6 @@ func TestPolicyEvict(t *testing.T) {
 						policy.OnInsert(nodes[1])
 
 						policy.OnAccess(nodes[0])
-
 					},
 					expected: func(nodes []*node) *node {
 						return nodes[1]
@@ -628,6 +625,7 @@ func TestSetPolicyMultipleTimes(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
+
 	if policy.Type != PolicyFIFO {
 		t.Errorf("expected policy type %v, got %v", PolicyFIFO, policy.Type)
 	}
@@ -637,6 +635,7 @@ func TestSetPolicyMultipleTimes(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
+
 	if policy.Type != PolicyLRU {
 		t.Errorf("expected policy type %v, got %v", PolicyLRU, policy.Type)
 	}
@@ -646,6 +645,7 @@ func TestSetPolicyMultipleTimes(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
+
 	if policy.Type != PolicyLFU {
 		t.Errorf("expected policy type %v, got %v", PolicyLFU, policy.Type)
 	}
@@ -655,6 +655,7 @@ func TestSetPolicyMultipleTimes(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
+
 	if policy.Type != PolicyLTR {
 		t.Errorf("expected policy type %v, got %v", PolicyLTR, policy.Type)
 	}
@@ -664,6 +665,7 @@ func TestSetPolicyMultipleTimes(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
+
 	if policy.Type != PolicyNone {
 		t.Errorf("expected policy type %v, got %v", PolicyNone, policy.Type)
 	}

@@ -6,35 +6,47 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	t.Parallel()
+
 	d := 1 * time.Second
 	timer := New(d)
+
 	if timer.duration != d {
 		t.Errorf("expected duration %#v, got %v", d, timer.duration)
 	}
+
 	if timer.Ticker == nil {
 		t.Error("expected Ticker to be non-nil")
 	}
 }
 
 func TestPauseTimerZeroDuration(t *testing.T) {
+	t.Parallel()
+
 	timer := New(0)
 	if timer.GetDuration() != 0 {
 		t.Errorf("expected duration %v, got %v", time.Duration(0), timer.GetDuration())
 	}
+
 	if timer.Ticker == nil {
 		t.Error("expected Ticker to be non-nil")
 	}
 }
 
 func TestPauseTimerResetToZero(t *testing.T) {
+	t.Parallel()
+
 	timer := New(1 * time.Second)
 	timer.Reset(0)
+
 	if timer.GetDuration() != 0 {
 		t.Errorf("expected duration %v, got %v", time.Duration(0), timer.GetDuration())
 	}
 }
 
 func TestPauseTimerPauseAndResume(t *testing.T) {
+	t.Parallel()
+
 	d := 1 * time.Second
 	timer := New(d)
 	timer.Stop() // Simulate pause
@@ -51,27 +63,36 @@ func TestPauseTimerPauseAndResume(t *testing.T) {
 }
 
 func TestPauseTimerReset(t *testing.T) {
+	t.Parallel()
+
 	d := 1 * time.Second
 	timer := New(d)
 	got := 2 * time.Second
 	timer.Reset(got)
+
 	if timer.duration != got {
 		t.Errorf("expected duration %v, got %v", got, timer.duration)
 	}
 }
 
 func TestPauseTimerResume(t *testing.T) {
+	t.Parallel()
+
 	d := 1 * time.Second
 	timer := NewStopped(d)
 	timer.Resume()
+
 	if timer.duration != d {
 		t.Errorf("expected duration %v, got %v", d, timer.duration)
 	}
 }
 
 func TestPauseTimerGetDuration(t *testing.T) {
+	t.Parallel()
+
 	d := 1 * time.Second
 	timer := New(d)
+
 	if timer.GetDuration() != d {
 		t.Errorf("expected duration %v, got %v", d, timer.GetDuration())
 	}

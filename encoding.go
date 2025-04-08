@@ -121,6 +121,7 @@ func (d *decoder) DecodeTime() (time.Time, error) {
 	if t.IsZero() {
 		t = zero[time.Time]()
 	}
+
 	return t, nil
 }
 
@@ -231,17 +232,21 @@ func (d *decoder) DecodeStore(s *store) error {
 }
 
 func (s *store) Snapshot(w io.WriteSeeker) error {
-	s.Lock.Lock()
-	defer s.Lock.Unlock()
+	s.Lock.RLock()
+	defer s.Lock.RUnlock()
 
 	if _, err := w.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 
 	wr := newEncoder(w)
-	defer wr.Flush()
 
-	return wr.EncodeStore(s)
+	err := wr.EncodeStore(s)
+	if err != nil {
+		return err
+	}
+
+	return wr.Flush()
 }
 
 func (s *store) LoadSnapshot(r io.ReadSeeker) error {

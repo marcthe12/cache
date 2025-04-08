@@ -1,22 +1,24 @@
 package cache
 
 import (
+	"errors"
 	"strconv"
 	"testing"
 	"time"
-
-	"errors"
 )
 
-func setupTestDB[K any, V any](tb testing.TB) *DB[K, V] {
+func setupTestDB[K any, V any](tb testing.TB) *Cache[K, V] {
 	tb.Helper()
 
 	db, err := OpenMem[K, V]()
 	if err != nil {
 		tb.Fatalf("unexpected error: %v", err)
 	}
+
 	tb.Cleanup(func() {
-		db.Close()
+		if err := db.Close(); err != nil {
+			tb.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	return &db
@@ -40,6 +42,7 @@ func TestDBGetSet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if want != got {
 			t.Fatalf("expected: %v, got: %v", want, got)
 		}
@@ -77,6 +80,7 @@ func TestDBGetSet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if want != got {
 			t.Fatalf("expected: %v, got: %v", want, got)
 		}
@@ -107,6 +111,7 @@ func TestDBDelete(t *testing.T) {
 
 		db := setupTestDB[string, string](t)
 		want := "Value"
+
 		if err := db.Set("Key", want, 0); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -140,7 +145,10 @@ func TestDBUpdateInPlace(t *testing.T) {
 		store := setupTestDB[string, string](t)
 
 		want := "Value"
-		store.Set("Key", "Initial", 1*time.Hour)
+
+		if err := store.Set("Key", "Initial", 1*time.Hour); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		processFunc := func(v string) (string, error) {
 			return want, nil
@@ -154,6 +162,7 @@ func TestDBUpdateInPlace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if want != got {
 			t.Errorf("got %v, want %v", got, want)
 		}
@@ -194,6 +203,7 @@ func TestDBMemoize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if got != "Value" {
 			t.Fatalf("expected: %v, got: %v", "Value", got)
 		}
@@ -202,6 +212,7 @@ func TestDBMemoize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if want != got {
 			t.Errorf("got %v, want %v", got, want)
 		}
@@ -214,7 +225,9 @@ func TestDBMemoize(t *testing.T) {
 
 		want := "NewValue"
 
-		store.Set("Key", "Value", 1*time.Hour)
+		if err := store.Set("Key", "Value", 1*time.Hour); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		factoryFunc := func() (string, error) {
 			return want, nil
@@ -224,6 +237,7 @@ func TestDBMemoize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if got != "Value" {
 			t.Fatalf("expected: %v, got: %v", "Value", got)
 		}
@@ -231,7 +245,7 @@ func TestDBMemoize(t *testing.T) {
 }
 
 func BenchmarkDBGet(b *testing.B) {
-	for n := 1; n <= 10000; n *= 10 {
+	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n {
@@ -241,8 +255,6 @@ func BenchmarkDBGet(b *testing.B) {
 			}
 
 			b.ReportAllocs()
-
-			b.ResetTimer()
 
 			for b.Loop() {
 				if _, _, err := db.GetValue(n - 1); err != nil {
@@ -254,7 +266,7 @@ func BenchmarkDBGet(b *testing.B) {
 }
 
 func BenchmarkDBSet(b *testing.B) {
-	for n := 1; n <= 10000; n *= 10 {
+	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n - 1 {
@@ -264,7 +276,6 @@ func BenchmarkDBSet(b *testing.B) {
 			}
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				if err := db.Set(n, n, 0); err != nil {
@@ -276,7 +287,7 @@ func BenchmarkDBSet(b *testing.B) {
 }
 
 func BenchmarkDBDelete(b *testing.B) {
-	for n := 1; n <= 10000; n *= 10 {
+	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			db := setupTestDB[int, int](b)
 			for i := range n - 1 {
@@ -286,12 +297,12 @@ func BenchmarkDBDelete(b *testing.B) {
 			}
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				if err := db.Set(n, n, 0); err != nil {
 					b.Fatalf("unexpected error: %v", err)
 				}
+
 				if err := db.Delete(n); err != nil {
 					b.Fatalf("unexpected error: %v", err)
 				}

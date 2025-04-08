@@ -1,11 +1,13 @@
 # Cache
 
+An deamonless in-memory caching library with persistant snapshots.
+
 ## Features
 
 - **In-Memory Cache**: Fast access to cached data.
 
 - **Uses Generics with serialization**: To make it type safe and support several types via msgpack.
-s
+
 - **File-Backed Storage**: Persistent storage of cache data.
 
 - **Eviction Policies**: Support for FIFO, LRU, LFU, and LTR eviction policies.
@@ -86,8 +88,16 @@ func main() {
 	}
 
 	// Get a value by key
-
 	value, ttl, err := db.GetValue("key")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Value: %s, TTL: %v\n", value, ttl)
+
+	// Get a value with a pointer by key(Useful if the value type is an interface).
+    var value string 
+	value, ttl, err := db.GetValue(&value)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -128,7 +138,7 @@ The Cache Library supports the following configuration options:
 
 ### Additional Methods
 
-- `Get`: Retrieves a value from the cache by key and returns its TTL.
+- `Get`: Retrieves a value from the cache by key and returns its TTL. It take an out pointer.
 
 - `GetValue`: Retrieves a value from the cache by key and returns the value and its TTL.
 

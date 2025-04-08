@@ -2,8 +2,8 @@ package cache
 
 import (
 	"errors"
+	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -12,19 +12,20 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// db represents a cache database with file-backed storage and in-memory operation.
-type db struct {
+// cache represents a cache database with file-backed storage and in-memory operation.
+type cache struct {
 	File  io.WriteSeeker
 	Store store
 	Stop  chan struct{}
 	wg    sync.WaitGroup
+	err   error
 }
 
 // Option is a function type for configuring the db.
-type Option func(*db) error
+type Option func(*cache) error
 
 // openFile opens a file-backed cache database with the given options.
-func openFile(filename string, options ...Option) (*db, error) {
+func openFile(filename string, options ...Option) (*cache, error) {
 	ret, err := openMem(options...)
 	if err != nil {
 		return nil, err
@@ -42,7 +43,9 @@ func openFile(filename string, options ...Option) (*db, error) {
 
 	if fileInfo.Size() == 0 {
 		ret.File = file
-		ret.Flush()
+		if err := ret.Flush(); err != nil {
+			return nil, err
+		}
 	} else {
 		err := ret.Store.LoadSnapshot(file)
 		if err != nil {
@@ -56,9 +59,10 @@ func openFile(filename string, options ...Option) (*db, error) {
 }
 
 // openMem initializes an in-memory cache database with the given options.
-func openMem(options ...Option) (*db, error) {
-	ret := &db{}
+func openMem(options ...Option) (*cache, error) {
+	ret := &cache{}
 	ret.Store.Init()
+
 	if err := ret.SetConfig(options...); err != nil {
 		return nil, err
 	}
@@ -66,21 +70,22 @@ func openMem(options ...Option) (*db, error) {
 	return ret, nil
 }
 
-// Start begins the background worker for periodic tasks.
-func (d *db) Start() {
-	d.Stop = make(chan struct{})
-	d.wg.Add(1)
+// start begins the background worker for periodic tasks.
+func (c *cache) start() {
+	c.Stop = make(chan struct{})
 
-	go d.backgroundWorker()
+	c.wg.Add(1)
+
+	go c.backgroundWorker()
 }
 
 // SetConfig applies configuration options to the db.
-func (d *db) SetConfig(options ...Option) error {
-	d.Store.Lock.Lock()
-	defer d.Store.Lock.Unlock()
+func (c *cache) SetConfig(options ...Option) error {
+	c.Store.Lock.Lock()
+	defer c.Store.Lock.Unlock()
 
 	for _, opt := range options {
-		if err := opt(d); err != nil {
+		if err := opt(c); err != nil {
 			return err
 		}
 	}
@@ -90,14 +95,14 @@ func (d *db) SetConfig(options ...Option) error {
 
 // WithPolicy sets the eviction policy for the cache.
 func WithPolicy(e EvictionPolicyType) Option {
-	return func(d *db) error {
+	return func(d *cache) error {
 		return d.Store.Policy.SetPolicy(e)
 	}
 }
 
 // WithMaxCost sets the maximum cost for the cache.
 func WithMaxCost(maxCost uint64) Option {
-	return func(d *db) error {
+	return func(d *cache) error {
 		d.Store.MaxCost = maxCost
 
 		return nil
@@ -106,7 +111,7 @@ func WithMaxCost(maxCost uint64) Option {
 
 // SetSnapshotTime sets the interval for taking snapshots of the cache.
 func SetSnapshotTime(t time.Duration) Option {
-	return func(d *db) error {
+	return func(d *cache) error {
 		d.Store.SnapshotTicker.Reset(t)
 
 		return nil
@@ -115,7 +120,7 @@ func SetSnapshotTime(t time.Duration) Option {
 
 // SetCleanupTime sets the interval for cleaning up expired entries.
 func SetCleanupTime(t time.Duration) Option {
-	return func(d *db) error {
+	return func(d *cache) error {
 		d.Store.CleanupTicker.Reset(t)
 
 		return nil
@@ -123,98 +128,115 @@ func SetCleanupTime(t time.Duration) Option {
 }
 
 // backgroundWorker performs periodic tasks such as snapshotting and cleanup.
-func (d *db) backgroundWorker() {
-	defer d.wg.Done()
+func (c *cache) backgroundWorker() {
+	defer c.wg.Done()
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in background worker: %v", r)
+			c.err = fmt.Errorf("panic occurred: %v", r)
 		}
 	}()
 
-	d.Store.SnapshotTicker.Resume()
-	defer d.Store.SnapshotTicker.Stop()
+	c.Store.SnapshotTicker.Resume()
+	defer c.Store.SnapshotTicker.Stop()
 
-	d.Store.CleanupTicker.Resume()
-	defer d.Store.CleanupTicker.Stop()
+	c.Store.CleanupTicker.Resume()
+	defer c.Store.CleanupTicker.Stop()
+
+	c.Store.Cleanup()
+	c.Store.Evict()
 
 	for {
 		select {
-		case <-d.Stop:
+		case <-c.Stop:
 			return
-		case <-d.Store.SnapshotTicker.C:
-			d.Flush()
-		case <-d.Store.CleanupTicker.C:
-			d.Store.Cleanup()
-			d.Store.Evict()
+		case <-c.Store.SnapshotTicker.C:
+			if err := c.Flush(); err != nil {
+				c.err = err
+			}
+		case <-c.Store.CleanupTicker.C:
+			c.Store.Cleanup()
+			c.Store.Evict()
 		}
 	}
 }
 
+func (c *cache) Error() error {
+	return c.err
+}
+
+func (c *cache) Cost() uint64 {
+	return c.Store.Cost
+}
+
 // Close stops the background worker and cleans up resources.
-func (d *db) Close() error {
-	close(d.Stop)
-	d.wg.Wait()
-	err := d.Flush()
-	d.Clear()
+func (c *cache) Close() error {
+	close(c.Stop)
+	c.wg.Wait()
+
+	err := c.Flush()
+	c.Clear()
 
 	var err1 error
-	if d.File != nil {
-		closer, ok := d.File.(io.Closer)
+
+	if c.File != nil {
+		closer, ok := c.File.(io.Closer)
 		if ok {
 			err1 = closer.Close()
 		}
 	}
+
 	if err != nil {
 		return err
 	}
+
 	return err1
 }
 
 // Flush writes the current state of the store to the file.
-func (d *db) Flush() error {
-	if d.File != nil {
-		return d.Store.Snapshot(d.File)
+func (c *cache) Flush() error {
+	if c.File != nil {
+		return c.Store.Snapshot(c.File)
 	}
 
 	return nil
 }
 
 // Clear removes all entries from the in-memory store.
-func (d *db) Clear() {
-	d.Store.Clear()
+func (c *cache) Clear() {
+	c.Store.Clear()
 }
 
 var ErrKeyNotFound = errors.New("key not found") // ErrKeyNotFound is returned when a key is not found in the cache.
 
-// The Cache database. Can be initialized by either OpenFile or OpenMem. Uses per DB Locks.
-// DB represents a generic cache database with key-value pairs.
-type DB[K any, V any] struct {
-	*db
+// The Cache database. Can be initialized by either OpenFile or OpenMem. Uses per Cache Locks.
+// Cache represents a generic cache database with key-value pairs.
+type Cache[K any, V any] struct {
+	*cache
 }
 
 // OpenFile opens a file-backed cache database with the specified options.
-func OpenFile[K any, V any](filename string, options ...Option) (DB[K, V], error) {
+func OpenFile[K any, V any](filename string, options ...Option) (Cache[K, V], error) {
 	ret, err := openFile(filename, options...)
 	if err != nil {
-		return zero[DB[K, V]](), err
+		return zero[Cache[K, V]](), err
 	}
 
-	ret.Start()
+	ret.start()
 
-	return DB[K, V]{db: ret}, nil
+	return Cache[K, V]{cache: ret}, nil
 }
 
 // OpenMem initializes an in-memory cache database with the specified options.
-func OpenMem[K any, V any](options ...Option) (DB[K, V], error) {
+func OpenMem[K any, V any](options ...Option) (Cache[K, V], error) {
 	ret, err := openMem(options...)
 	if err != nil {
-		return zero[DB[K, V]](), err
+		return zero[Cache[K, V]](), err
 	}
 
-	ret.Start()
+	ret.start()
 
-	return DB[K, V]{db: ret}, nil
+	return Cache[K, V]{cache: ret}, nil
 }
 
 // marshal serializes a value using msgpack.
@@ -228,13 +250,17 @@ func unmarshal[T any](data []byte, v *T) error {
 }
 
 // Get retrieves a value from the cache by key and returns its TTL.
-func (h *DB[K, V]) Get(key K, value *V) (time.Duration, error) {
+func (c *Cache[K, V]) Get(key K, value *V) (time.Duration, error) {
 	keyData, err := marshal(key)
 	if err != nil {
 		return 0, err
 	}
 
-	v, ttl, ok := h.Store.Get(keyData)
+	if err := c.err; err != nil {
+		return 0, err
+	}
+
+	v, ttl, ok := c.Store.Get(keyData)
 	if !ok {
 		return 0, ErrKeyNotFound
 	}
@@ -249,15 +275,15 @@ func (h *DB[K, V]) Get(key K, value *V) (time.Duration, error) {
 }
 
 // GetValue retrieves a value from the cache by key and returns the value and its TTL.
-func (h *DB[K, V]) GetValue(key K) (V, time.Duration, error) {
+func (c *Cache[K, V]) GetValue(key K) (V, time.Duration, error) {
 	value := zero[V]()
-	ttl, err := h.Get(key, &value)
+	ttl, err := c.Get(key, &value)
 
 	return value, ttl, err
 }
 
 // Set adds a key-value pair to the cache with a specified TTL.
-func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
+func (c *Cache[K, V]) Set(key K, value V, ttl time.Duration) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
@@ -268,19 +294,27 @@ func (h *DB[K, V]) Set(key K, value V, ttl time.Duration) error {
 		return err
 	}
 
-	h.Store.Set(keyData, valueData, ttl)
+	if err := c.err; err != nil {
+		return err
+	}
+
+	c.Store.Set(keyData, valueData, ttl)
 
 	return nil
 }
 
 // Delete removes a key-value pair from the cache.
-func (h *DB[K, V]) Delete(key K) error {
+func (c *Cache[K, V]) Delete(key K) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}
 
-	ok := h.Store.Delete(keyData)
+	if err := c.err; err != nil {
+		return err
+	}
+
+	ok := c.Store.Delete(keyData)
 	if !ok {
 		return ErrKeyNotFound
 	}
@@ -290,13 +324,17 @@ func (h *DB[K, V]) Delete(key K) error {
 
 // UpdateInPlace retrieves a value from the cache, processes it using the provided function,
 // and then sets the result back into the cache with the same key.
-func (h *DB[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error {
+func (c *Cache[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}
 
-	return h.Store.UpdateInPlace(keyData, func(data []byte) ([]byte, error) {
+	if err := c.err; err != nil {
+		return err
+	}
+
+	return c.Store.UpdateInPlace(keyData, func(data []byte) ([]byte, error) {
 		var value V
 		if err := unmarshal(data, &value); err != nil {
 			return nil, err
@@ -313,13 +351,17 @@ func (h *DB[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time
 
 // Memorize attempts to retrieve a value from the cache. If the retrieval fails,
 // it sets the result of the factory function into the cache and returns that result.
-func (h *DB[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
+func (c *Cache[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
 	keyData, err := marshal(key)
 	if err != nil {
 		return zero[V](), err
 	}
 
-	data, err := h.Store.Memorize(keyData, func() ([]byte, error) {
+	if err := c.err; err != nil {
+		return zero[V](), err
+	}
+
+	data, err := c.Store.Memorize(keyData, func() ([]byte, error) {
 		value, err := factoryFunc()
 		if err != nil {
 			return nil, err
@@ -327,7 +369,6 @@ func (h *DB[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Durat
 
 		return marshal(value)
 	}, ttl)
-
 	if err != nil {
 		return zero[V](), err
 	}

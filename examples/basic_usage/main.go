@@ -14,11 +14,16 @@ func main() {
 		fmt.Println("Error:", err)
 		return
 	}
-	defer db.Close()
+
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			fmt.Println("Error:", err)
+		}
+	}()
 
 	// Set a value with a TTL of 5 seconds
-	err = db.Set("key1", "value1", 5*time.Second)
-	if err != nil {
+	if err = db.Set("key1", "value1", 5*time.Second); err != nil {
 		fmt.Println("Set Error:", err)
 		return
 	}
@@ -33,6 +38,7 @@ func main() {
 
 	// Wait for 6 seconds and try to get the value again
 	time.Sleep(6 * time.Second)
+
 	value, ttl, err = db.GetValue("key1")
 	if err != nil {
 		fmt.Println("Get Error after TTL:", err)

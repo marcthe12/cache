@@ -10,7 +10,7 @@ import (
 
 const (
 	initialBucketSize uint64  = 8
-	loadFactor        float64 = 0.75
+	loadFactor        float64 = 0.9
 )
 
 // node represents an entry in the cache with metadata for eviction and expiration.
@@ -142,8 +142,6 @@ func (s *store) Get(key []byte) ([]byte, time.Duration, bool) {
 	v, _, _ := s.lookup(key)
 	if v != nil {
 		if !v.IsValid() {
-			//deleteNode(s, v)
-
 			return nil, 0, false
 		}
 
@@ -196,9 +194,11 @@ func (s *store) Cleanup() {
 
 	for v := s.EvictList.EvictNext; v != &s.EvictList; {
 		n := v.EvictNext
+
 		if !v.IsValid() {
 			deleteNode(s, v)
 		}
+
 		v = n
 	}
 }
@@ -220,6 +220,7 @@ func (s *store) Evict() bool {
 		if n == nil {
 			break
 		}
+
 		deleteNode(s, n)
 	}
 
@@ -231,7 +232,7 @@ func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
 	idx, hash := lookupIdx(s, key)
 	bucket := &s.Bucket[idx]
 
-	if float64(s.Length)/float64(len(s.Bucket)) > float64(loadFactor) {
+	if float64(s.Length) > loadFactor*float64(len(s.Bucket)) {
 		s.Resize()
 		// resize may invalidate pointer to bucket
 		idx, _ = lookupIdx(s, key)
@@ -270,14 +271,17 @@ func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
 	v, _, _ := s.lookup(key)
 	if v != nil {
 		cost := v.Cost()
+
 		v.Value = value
 		if ttl != 0 {
 			v.Expiration = time.Now().Add(ttl)
 		} else {
 			v.Expiration = zero[time.Time]()
 		}
+
 		s.Cost = s.Cost + v.Cost() - cost
 		s.Policy.OnUpdate(v)
+
 		return
 	}
 
@@ -330,12 +334,14 @@ func (s *store) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, erro
 	}
 
 	cost := v.Cost()
+
 	v.Value = value
 	if ttl != 0 {
 		v.Expiration = time.Now().Add(ttl)
 	} else {
 		v.Expiration = zero[time.Time]()
 	}
+
 	s.Cost = s.Cost + v.Cost() - cost
 	s.Policy.OnUpdate(v)
 
@@ -360,5 +366,6 @@ func (s *store) Memorize(key []byte, factory func() ([]byte, error), ttl time.Du
 	}
 
 	s.insert(key, value, ttl)
+
 	return value, nil
 }

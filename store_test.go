@@ -19,14 +19,19 @@ func setupTestStore(tb testing.TB) *store {
 }
 
 func TestNodeIsValid(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		node    *node
 		isValid bool
 	}{
 		{
-			name:    "Valid node with non-zero expiration",
-			node:    &node{Key: []byte("key1"), Value: []byte("value1"), Expiration: time.Now().Add(10 * time.Minute)},
+			name: "Valid node with non-zero expiration",
+			node: &node{
+				Key: []byte("key1"), Value: []byte("value1"),
+				Expiration: time.Now().Add(10 * time.Minute),
+			},
 			isValid: true,
 		},
 		{
@@ -35,14 +40,19 @@ func TestNodeIsValid(t *testing.T) {
 			isValid: true,
 		},
 		{
-			name:    "Expired node",
-			node:    &node{Key: []byte("key3"), Value: []byte("value3"), Expiration: time.Now().Add(-1 * time.Minute)},
+			name: "Expired node",
+			node: &node{
+				Key: []byte("key3"), Value: []byte("value3"),
+				Expiration: time.Now().Add(-1 * time.Minute),
+			},
 			isValid: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.node.IsValid(); got != tt.isValid {
 				t.Errorf("IsValid() = %v, want %v", got, tt.isValid)
 			}
@@ -51,6 +61,8 @@ func TestNodeIsValid(t *testing.T) {
 }
 
 func TestNodeTTL(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		node *node
@@ -58,8 +70,11 @@ func TestNodeTTL(t *testing.T) {
 	}{
 		{
 			name: "Node with non-zero expiration",
-			node: &node{Key: []byte("key1"), Value: []byte("value1"), Expiration: time.Now().Add(10 * time.Minute)},
-			ttl:  10 * time.Minute,
+			node: &node{
+				Key: []byte("key1"), Value: []byte("value1"),
+				Expiration: time.Now().Add(10 * time.Minute),
+			},
+			ttl: 10 * time.Minute,
 		},
 		{
 			name: "Node with zero expiration",
@@ -68,13 +83,18 @@ func TestNodeTTL(t *testing.T) {
 		},
 		{
 			name: "Expired node",
-			node: &node{Key: []byte("key3"), Value: []byte("value3"), Expiration: time.Now().Add(-1 * time.Minute)},
-			ttl:  -1 * time.Minute, // Should be negative or 0, depending on the implementation
+			node: &node{
+				Key: []byte("key3"), Value: []byte("value3"),
+				Expiration: time.Now().Add(-1 * time.Minute),
+			},
+			ttl: -1 * time.Minute, // Should be negative or 0, depending on the implementation
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.node.TTL().Round(time.Second); got != tt.ttl {
 				t.Errorf("TTL() = %v, want %v", got, tt.ttl)
 			}
@@ -83,6 +103,8 @@ func TestNodeTTL(t *testing.T) {
 }
 
 func TestNodeCost(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		node *node
@@ -112,6 +134,8 @@ func TestNodeCost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.node.Cost(); got != tt.cost {
 				t.Errorf("Cost() = %v, want %v", got, tt.cost)
 			}
@@ -129,17 +153,19 @@ func TestStoreGetSet(t *testing.T) {
 
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 0)
+
 		got, ttl, ok := store.Get([]byte("Key"))
 		if !ok {
 			t.Fatalf("expected key to exist")
 		}
+
 		if !bytes.Equal(want, got) {
 			t.Errorf("got %v, want %v", got, want)
 		}
+
 		if ttl.Round(time.Second) != 0 {
 			t.Errorf("ttl same: got %v expected %v", ttl.Round(time.Second), 1*time.Hour)
 		}
-
 	})
 
 	t.Run("Exists Non Expiry", func(t *testing.T) {
@@ -149,17 +175,19 @@ func TestStoreGetSet(t *testing.T) {
 
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 1*time.Hour)
+
 		got, ttl, ok := store.Get([]byte("Key"))
 		if !ok {
 			t.Fatalf("expected key to exist")
 		}
+
 		if !bytes.Equal(want, got) {
 			t.Errorf("got %v, want %v", got, want)
 		}
+
 		if ttl.Round(time.Second) != 1*time.Hour {
 			t.Errorf("ttl same: got %v expected %v", ttl.Round(time.Second), 1*time.Hour)
 		}
-
 	})
 
 	t.Run("Exists TTL", func(t *testing.T) {
@@ -169,6 +197,7 @@ func TestStoreGetSet(t *testing.T) {
 
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, time.Nanosecond)
+
 		if _, _, ok := store.Get([]byte("Key")); ok {
 			t.Errorf("expected key to not exist")
 		}
@@ -192,14 +221,15 @@ func TestStoreGetSet(t *testing.T) {
 
 		want := []byte("Value")
 		store.Set([]byte("Key"), want, 0)
+
 		got, _, ok := store.Get([]byte("Key"))
 		if !ok {
 			t.Fatal("expected key to exist")
 		}
+
 		if !bytes.Equal(want, got) {
 			t.Errorf("got %v, want %v", got, want)
 		}
-
 	})
 
 	t.Run("Resize", func(t *testing.T) {
@@ -207,7 +237,9 @@ func TestStoreGetSet(t *testing.T) {
 
 		store := setupTestStore(t)
 
-		for i := range initialBucketSize {
+		size := uint64(float64(len(store.Bucket))*loadFactor + 1)
+
+		for i := range size + 1 {
 			key := binary.LittleEndian.AppendUint64(nil, i)
 			store.Set(key, key, 0)
 		}
@@ -220,7 +252,7 @@ func TestStoreGetSet(t *testing.T) {
 		}
 
 		if len(store.Bucket) != int(initialBucketSize)*2 {
-			t.Errorf("expected bucket size to be %v, got %v", initialBucketSize*2, len(store.Bucket))
+			t.Errorf("expected bucket size to be %v, got %v", size*2, len(store.Bucket))
 		}
 
 		for i := range store.Length {
@@ -246,6 +278,7 @@ func TestStoreDelete(t *testing.T) {
 		if !store.Delete([]byte("Key")) {
 			t.Errorf("expected key to be deleted")
 		}
+
 		if _, _, ok := store.Get([]byte("Key")); ok {
 			t.Errorf("expected key to not exist")
 		}
@@ -270,6 +303,7 @@ func TestStoreClear(t *testing.T) {
 	want := []byte("Value")
 	store.Set([]byte("Key"), want, 0)
 	store.Clear()
+
 	if _, _, ok := store.Get([]byte("Key")); ok {
 		t.Errorf("expected key to not exist")
 	}
@@ -284,6 +318,7 @@ func TestStoreUpdateInPlace(t *testing.T) {
 		store := setupTestStore(t)
 
 		want := []byte("Value")
+
 		store.Set([]byte("Key"), []byte("Initial"), 1*time.Hour)
 
 		processFunc := func(v []byte) ([]byte, error) {
@@ -298,6 +333,7 @@ func TestStoreUpdateInPlace(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected key to exist")
 		}
+
 		if !bytes.Equal(want, got) {
 			t.Errorf("got %v, want %v", got, want)
 		}
@@ -334,6 +370,7 @@ func TestStoreMemoize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if !bytes.Equal(got, []byte("Value")) {
 			t.Fatalf("expected: %v, got: %v", "Value", got)
 		}
@@ -342,6 +379,7 @@ func TestStoreMemoize(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected key to exist")
 		}
+
 		if !bytes.Equal(got, []byte("Value")) {
 			t.Fatalf("expected: %v, got: %v", "Value", got)
 		}
@@ -362,6 +400,7 @@ func TestStoreMemoize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if !bytes.Equal(got, []byte("Value")) {
 			t.Fatalf("expected: %v, got: %v", "Value", got)
 		}
@@ -444,6 +483,7 @@ func TestStoreEvict(t *testing.T) {
 		if err := store.Policy.SetPolicy(PolicyFIFO); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		store.MaxCost = 10
 
 		store.Set([]byte("1"), []byte("1"), 0)
@@ -469,6 +509,7 @@ func TestStoreEvict(t *testing.T) {
 		if err := store.Policy.SetPolicy(PolicyNone); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		store.MaxCost = 5
 
 		store.Set([]byte("1"), []byte("1"), 0)
@@ -494,6 +535,7 @@ func TestStoreEvict(t *testing.T) {
 		if err := store.Policy.SetPolicy(PolicyFIFO); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		store.MaxCost = 0
 
 		store.Set([]byte("1"), []byte("1"), 0)
@@ -521,7 +563,7 @@ func BenchmarkStoreGet(b *testing.B) {
 	}
 	for k, v := range policy {
 		b.Run(k, func(b *testing.B) {
-			for n := 1; n <= 10000; n *= 10 {
+			for n := 1; n <= 100000; n *= 10 {
 				b.Run(strconv.Itoa(n), func(b *testing.B) {
 					want := setupTestStore(b)
 
@@ -538,8 +580,6 @@ func BenchmarkStoreGet(b *testing.B) {
 					key := []byte("Key")
 					want.Set(key, []byte("Store"), 0)
 					b.ReportAllocs()
-
-					b.ResetTimer()
 
 					for b.Loop() {
 						want.Get(key)
@@ -560,7 +600,7 @@ func BenchmarkStoreGetParallel(b *testing.B) {
 	}
 	for k, v := range policy {
 		b.Run(k, func(b *testing.B) {
-			for n := 1; n <= 10000; n *= 10 {
+			for n := 1; n <= 100000; n *= 10 {
 				b.Run(strconv.Itoa(n), func(b *testing.B) {
 					want := setupTestStore(b)
 
@@ -577,8 +617,6 @@ func BenchmarkStoreGetParallel(b *testing.B) {
 					key := []byte("Key")
 					want.Set(key, []byte("Store"), 0)
 					b.ReportAllocs()
-
-					b.ResetTimer()
 
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
@@ -601,7 +639,7 @@ func BenchmarkStoreSet(b *testing.B) {
 	}
 	for k, v := range policy {
 		b.Run(k, func(b *testing.B) {
-			for n := 1; n <= 10000; n *= 10 {
+			for n := 1; n <= 100000; n *= 10 {
 				b.Run(strconv.Itoa(n), func(b *testing.B) {
 					want := setupTestStore(b)
 
@@ -619,7 +657,6 @@ func BenchmarkStoreSet(b *testing.B) {
 					store := []byte("Store")
 
 					b.ReportAllocs()
-					b.ResetTimer()
 
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
@@ -642,7 +679,7 @@ func BenchmarkStoreSetParallel(b *testing.B) {
 	}
 	for k, v := range policy {
 		b.Run(k, func(b *testing.B) {
-			for n := 1; n <= 10000; n *= 10 {
+			for n := 1; n <= 100000; n *= 10 {
 				b.Run(strconv.Itoa(n), func(b *testing.B) {
 					want := setupTestStore(b)
 
@@ -660,7 +697,6 @@ func BenchmarkStoreSetParallel(b *testing.B) {
 					store := []byte("Store")
 
 					b.ReportAllocs()
-					b.ResetTimer()
 
 					for b.Loop() {
 						want.Set(key, store, 0)
@@ -681,7 +717,7 @@ func BenchmarkStoreSetInsert(b *testing.B) {
 	}
 	for k, v := range policy {
 		b.Run(k, func(b *testing.B) {
-			for n := 1; n <= 10000; n *= 10 {
+			for n := 1; n <= 100000; n *= 10 {
 				b.Run(strconv.Itoa(n), func(b *testing.B) {
 					want := setupTestStore(b)
 
@@ -690,6 +726,7 @@ func BenchmarkStoreSetInsert(b *testing.B) {
 					}
 
 					list := make([][]byte, n)
+
 					for i := range n {
 						buf := make([]byte, 8)
 						binary.LittleEndian.PutUint64(buf, uint64(i))
@@ -697,12 +734,13 @@ func BenchmarkStoreSetInsert(b *testing.B) {
 					}
 
 					b.ReportAllocs()
-					b.ResetTimer()
 
 					for b.Loop() {
 						for _, k := range list {
 							want.Set(k, k, 0)
 						}
+
+						want.Clear()
 					}
 				})
 			}
@@ -711,7 +749,7 @@ func BenchmarkStoreSetInsert(b *testing.B) {
 }
 
 func BenchmarkStoreDelete(b *testing.B) {
-	for n := 1; n <= 10000; n *= 10 {
+	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			want := setupTestStore(b)
 
@@ -725,7 +763,6 @@ func BenchmarkStoreDelete(b *testing.B) {
 			store := []byte("Store")
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				want.Set(key, store, 0)
