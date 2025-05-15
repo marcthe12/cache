@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func setupTestDB[K any, V any](tb testing.TB) *Cache[K, V] {
+func setupTestCache[K, V any](tb testing.TB) *Cache[K, V] {
 	tb.Helper()
 
 	db, err := OpenMem[K, V]()
@@ -24,13 +24,91 @@ func setupTestDB[K any, V any](tb testing.TB) *Cache[K, V] {
 	return &db
 }
 
-func TestDBGetSet(t *testing.T) {
+func TestCacheSetConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		options         []Option
+		wantErr         bool
+		expectedPolicy  EvictionPolicyType
+		expectedMaxCost uint64
+		snapshotTime    time.Duration
+		cleanupTime     time.Duration
+	}{
+		{
+			name: "Set all valid options",
+			options: []Option{
+				WithPolicy(PolicyLRU),
+				WithMaxCost(10000),
+				SetSnapshotTime(2 * time.Minute),
+				SetCleanupTime(30 * time.Second),
+			},
+			wantErr:         false,
+			expectedPolicy:  PolicyLRU,
+			expectedMaxCost: 10000,
+			snapshotTime:    2 * time.Minute,
+			cleanupTime:     30 * time.Second,
+		},
+		{
+			name: "Invalid policy returns error",
+			options: []Option{
+				WithPolicy(-1),
+			},
+			wantErr: true,
+		},
+		{
+			name: "Set only max cost",
+			options: []Option{
+				WithMaxCost(2048),
+			},
+			wantErr:         false,
+			expectedMaxCost: 2048,
+		},
+		{
+			name: "Set only snapshot and cleanup",
+			options: []Option{
+				SetSnapshotTime(15 * time.Second),
+				SetCleanupTime(1 * time.Minute),
+			},
+			wantErr:      false,
+			snapshotTime: 15 * time.Second,
+			cleanupTime:  1 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := setupTestCache[string, string](t)
+
+			err := c.SetConfig(tt.options...)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SetConfig() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+
+			if !tt.wantErr {
+				if c.Store.Policy.Type != tt.expectedPolicy {
+					t.Errorf("Expected policy %v, got %v", tt.expectedPolicy, c.Store.Policy.Type)
+				}
+				if tt.expectedMaxCost != 0 && c.Store.MaxCost != tt.expectedMaxCost {
+					t.Errorf("Expected MaxCost %d, got %d", tt.expectedMaxCost, c.Store.MaxCost)
+				}
+				if tt.snapshotTime != 0 && c.Store.SnapshotTicker.GetDuration() != tt.snapshotTime {
+					t.Errorf("Expected SnapshotTime %v, got %v", tt.snapshotTime, c.Store.SnapshotTicker.GetDuration())
+				}
+				if tt.cleanupTime != 0 && c.Store.CleanupTicker.GetDuration() != tt.cleanupTime {
+					t.Errorf("Expected CleanupTime %v, got %v", tt.cleanupTime, c.Store.CleanupTicker.GetDuration())
+				}
+			}
+		})
+	}
+}
+
+func TestCacheGetSet(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Exists", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 
 		want := "Value"
 
@@ -55,7 +133,7 @@ func TestDBGetSet(t *testing.T) {
 	t.Run("Not Exists", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 
 		if _, _, err := db.GetValue("Key"); !errors.Is(err, ErrKeyNotFound) {
 			t.Fatalf("expected error: %v, got: %v", ErrKeyNotFound, err)
@@ -65,7 +143,7 @@ func TestDBGetSet(t *testing.T) {
 	t.Run("Update", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 
 		if err := db.Set("Key", "Other", 0); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
@@ -89,7 +167,7 @@ func TestDBGetSet(t *testing.T) {
 	t.Run("Key Expiry", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 
 		if err := db.Set("Key", "Value", 500*time.Millisecond); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -103,13 +181,13 @@ func TestDBGetSet(t *testing.T) {
 	})
 }
 
-func TestDBDelete(t *testing.T) {
+func TestCacheDelete(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Exists", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 		want := "Value"
 
 		if err := db.Set("Key", want, 0); err != nil {
@@ -128,7 +206,7 @@ func TestDBDelete(t *testing.T) {
 	t.Run("Not Exists", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDB[string, string](t)
+		db := setupTestCache[string, string](t)
 
 		if err := db.Delete("Key"); !errors.Is(err, ErrKeyNotFound) {
 			t.Fatalf("expected error: %v, got: %v", ErrKeyNotFound, err)
@@ -136,13 +214,13 @@ func TestDBDelete(t *testing.T) {
 	})
 }
 
-func TestDBUpdateInPlace(t *testing.T) {
+func TestCacheUpdateInPlace(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := setupTestDB[string, string](t)
+		store := setupTestCache[string, string](t)
 
 		want := "Value"
 
@@ -171,7 +249,7 @@ func TestDBUpdateInPlace(t *testing.T) {
 	t.Run("Not Exists", func(t *testing.T) {
 		t.Parallel()
 
-		store := setupTestDB[string, string](t)
+		store := setupTestCache[string, string](t)
 
 		want := "Value"
 
@@ -185,13 +263,13 @@ func TestDBUpdateInPlace(t *testing.T) {
 	})
 }
 
-func TestDBMemoize(t *testing.T) {
+func TestCacheMemoize(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Cache Miss", func(t *testing.T) {
 		t.Parallel()
 
-		store := setupTestDB[string, string](t)
+		store := setupTestCache[string, string](t)
 
 		want := "Value"
 
@@ -221,7 +299,7 @@ func TestDBMemoize(t *testing.T) {
 	t.Run("Cache Hit", func(t *testing.T) {
 		t.Parallel()
 
-		store := setupTestDB[string, string](t)
+		store := setupTestCache[string, string](t)
 
 		want := "NewValue"
 
@@ -244,10 +322,10 @@ func TestDBMemoize(t *testing.T) {
 	})
 }
 
-func BenchmarkDBGet(b *testing.B) {
+func BenchmarkCacheGet(b *testing.B) {
 	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
-			db := setupTestDB[int, int](b)
+			db := setupTestCache[int, int](b)
 			for i := range n {
 				if err := db.Set(i, i, 0); err != nil {
 					b.Fatalf("unexpected error: %v", err)
@@ -265,10 +343,10 @@ func BenchmarkDBGet(b *testing.B) {
 	}
 }
 
-func BenchmarkDBSet(b *testing.B) {
+func BenchmarkCacheSet(b *testing.B) {
 	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
-			db := setupTestDB[int, int](b)
+			db := setupTestCache[int, int](b)
 			for i := range n - 1 {
 				if err := db.Set(i, i, 0); err != nil {
 					b.Fatalf("unexpected error: %v", err)
@@ -286,10 +364,10 @@ func BenchmarkDBSet(b *testing.B) {
 	}
 }
 
-func BenchmarkDBDelete(b *testing.B) {
+func BenchmarkCacheDelete(b *testing.B) {
 	for n := 1; n <= 100000; n *= 10 {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
-			db := setupTestDB[int, int](b)
+			db := setupTestCache[int, int](b)
 			for i := range n - 1 {
 				if err := db.Set(i, i, 0); err != nil {
 					b.Fatalf("unexpected error: %v", err)

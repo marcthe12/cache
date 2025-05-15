@@ -34,7 +34,7 @@ type evictionPolicy struct {
 }
 
 // pushEvict adds a node to the eviction list.
-func pushEvict(node *node, sentinnel *node) {
+func pushEvict(node, sentinnel *node) {
 	node.EvictPrev = sentinnel
 	node.EvictNext = node.EvictPrev.EvictNext
 	node.EvictNext.EvictPrev = node

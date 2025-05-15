@@ -231,12 +231,14 @@ func (d *decoder) DecodeStore(s *store) error {
 	return nil
 }
 
-func (s *store) Snapshot(w io.WriteSeeker) error {
+func (s *store) Snapshot(w io.Writer) error {
 	s.Lock.RLock()
 	defer s.Lock.RUnlock()
 
-	if _, err := w.Seek(0, io.SeekStart); err != nil {
-		return err
+	if seeker, ok := w.(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
 	}
 
 	wr := newEncoder(w)
@@ -249,9 +251,11 @@ func (s *store) Snapshot(w io.WriteSeeker) error {
 	return wr.Flush()
 }
 
-func (s *store) LoadSnapshot(r io.ReadSeeker) error {
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return err
+func (s *store) LoadSnapshot(r io.Reader) error {
+	if seeker, ok := r.(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
 	}
 
 	d := newDecoder(r)

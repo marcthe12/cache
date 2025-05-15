@@ -21,14 +21,20 @@ type cache struct {
 	err   error
 }
 
-// Option is a function type for configuring the db.
+// Option is a function type for configuring the cache.
 type Option func(*cache) error
 
-// openFile opens a file-backed cache database with the given options.
-func openFile(filename string, options ...Option) (*cache, error) {
-	ret, err := openMem(options...)
-	if err != nil {
+// open opens a file-backed cache database with the given options.
+func open(filename string, options ...Option) (*cache, error) {
+	ret := &cache{}
+	ret.Store.Init()
+
+	if err := ret.SetConfig(options...); err != nil {
 		return nil, err
+	}
+
+	if filename == "" {
+		return ret, nil
 	}
 
 	file, err := lockedfile.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0o666)
@@ -58,18 +64,6 @@ func openFile(filename string, options ...Option) (*cache, error) {
 	return ret, nil
 }
 
-// openMem initializes an in-memory cache database with the given options.
-func openMem(options ...Option) (*cache, error) {
-	ret := &cache{}
-	ret.Store.Init()
-
-	if err := ret.SetConfig(options...); err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
 // start begins the background worker for periodic tasks.
 func (c *cache) start() {
 	c.Stop = make(chan struct{})
@@ -79,7 +73,7 @@ func (c *cache) start() {
 	go c.backgroundWorker()
 }
 
-// SetConfig applies configuration options to the db.
+// SetConfig applies configuration options to the cache.
 func (c *cache) SetConfig(options ...Option) error {
 	c.Store.Lock.Lock()
 	defer c.Store.Lock.Unlock()
@@ -209,34 +203,131 @@ func (c *cache) Clear() {
 
 var ErrKeyNotFound = errors.New("key not found") // ErrKeyNotFound is returned when a key is not found in the cache.
 
-// The Cache database. Can be initialized by either OpenFile or OpenMem. Uses per Cache Locks.
+// Get retrieves a value from the cache by key and returns its TTL.
+func (c *cache) Get(key []byte, value *[]byte) (time.Duration, error) {
+	v, ttl, err := c.GetValue(key)
+	*value = v
+
+	return ttl, err
+}
+
+// GetValue retrieves a value from the cache by key and returns the value and its TTL.
+func (c *cache) GetValue(key []byte) ([]byte, time.Duration, error) {
+	if err := c.err; err != nil {
+		return zero[[]byte](), 0, err
+	}
+
+	v, ttl, ok := c.Store.Get(key)
+	if !ok {
+		return v, 0, ErrKeyNotFound
+	}
+
+	return v, ttl, nil
+}
+
+// Set adds a key-value pair to the cache with a specified TTL.
+func (c *cache) Set(key, value []byte, ttl time.Duration) error {
+	if err := c.err; err != nil {
+		return err
+	}
+
+	c.Store.Set(key, value, ttl)
+
+	return nil
+}
+
+// Delete removes a key-value pair from the cache.
+func (c *cache) Delete(key []byte) error {
+	ok := c.Store.Delete(key)
+	if !ok {
+		return ErrKeyNotFound
+	}
+
+	return nil
+}
+
+// UpdateInPlace retrieves a value from the cache, processes it using the provided function,
+// and then sets the result back into the cache with the same key.
+func (c *cache) UpdateInPlace(key []byte, processFunc func([]byte) ([]byte, error), ttl time.Duration) error {
+	if err := c.err; err != nil {
+		return err
+	}
+
+	return c.Store.UpdateInPlace(key, processFunc, ttl)
+}
+
+// Memorize attempts to retrieve a value from the cache. If the retrieval fails,
+// it sets the result of the factory function into the cache and returns that result.
+func (c *cache) Memorize(key []byte, factoryFunc func() ([]byte, error), ttl time.Duration) ([]byte, error) {
+	if err := c.err; err != nil {
+		return []byte{}, err
+	}
+
+	return c.Store.Memorize(key, factoryFunc, ttl)
+}
+
+// The Cache database. Can be initialized by either Open or OpenFile or OpenMem. Uses per Cache Locks.
 // Cache represents a generic cache database with key-value pairs.
 type Cache[K any, V any] struct {
 	*cache
 }
 
-// OpenFile opens a file-backed cache database with the specified options.
-func OpenFile[K any, V any](filename string, options ...Option) (Cache[K, V], error) {
-	ret, err := openFile(filename, options...)
+// The CacheRaw database. Can be initialized by either OpenRaw or OpenRawFile or OpenRawMem. Uses per Cache Locks.
+// CacheRaw represents a binary cache database with key-value pairs.
+type CacheRaw struct {
+	*cache
+}
+
+// OpenRaw opens a binary cache database with the specified options. If filename is empty then in-memory otherwise file backed.
+func OpenRaw(filename string, options ...Option) (CacheRaw, error) {
+	ret, err := open(filename, options...)
 	if err != nil {
-		return zero[Cache[K, V]](), err
+		return zero[CacheRaw](), err
 	}
 
 	ret.start()
 
-	return Cache[K, V]{cache: ret}, nil
+	return CacheRaw{cache: ret}, nil
+}
+
+var ErrEmptyFilename = errors.New("cannot open empty filename")
+
+// OpenRawFile opens a binary file-backed cache database with the specified options.
+func OpenRawFile(filename string, options ...Option) (CacheRaw, error) {
+	if filename == "" {
+		return zero[CacheRaw](), ErrEmptyFilename
+	}
+
+	return OpenRaw(filename, options...)
+}
+
+// OpenRawMem initializes a binary in-memory cache database with the specified options.
+func OpenRawMem(options ...Option) (CacheRaw, error) {
+	return OpenRaw("", options...)
+}
+
+// Open opens a cache database with the specified options. If filename is empty then in-memory otherwise file backed.
+func Open[K, V any](filename string, options ...Option) (Cache[K, V], error) {
+	ret, err := OpenRaw(filename, options...)
+	if err != nil {
+		return zero[Cache[K, V]](), err
+	}
+
+	return Cache[K, V]{cache: ret.cache}, nil
+}
+
+// OpenFile opens a file-backed cache database with the specified options.
+func OpenFile[K, V any](filename string, options ...Option) (Cache[K, V], error) {
+	if filename == "" {
+		return zero[Cache[K, V]](), ErrEmptyFilename
+	}
+
+	return Open[K, V](filename, options...)
 }
 
 // OpenMem initializes an in-memory cache database with the specified options.
-func OpenMem[K any, V any](options ...Option) (Cache[K, V], error) {
-	ret, err := openMem(options...)
-	if err != nil {
-		return zero[Cache[K, V]](), err
-	}
-
-	ret.start()
-
-	return Cache[K, V]{cache: ret}, nil
+func OpenMem[K, V any](options ...Option) (Cache[K, V], error) {
+	return Open[K, V]("", options...)
 }
 
 // marshal serializes a value using msgpack.
@@ -250,19 +341,15 @@ func unmarshal[T any](data []byte, v *T) error {
 }
 
 // Get retrieves a value from the cache by key and returns its TTL.
-func (c *Cache[K, V]) Get(key K, value *V) (time.Duration, error) {
+func (c Cache[K, V]) Get(key K, value *V) (time.Duration, error) {
 	keyData, err := marshal(key)
 	if err != nil {
 		return 0, err
 	}
 
-	if err := c.err; err != nil {
+	v, ttl, err := c.cache.GetValue(keyData)
+	if err != nil {
 		return 0, err
-	}
-
-	v, ttl, ok := c.Store.Get(keyData)
-	if !ok {
-		return 0, ErrKeyNotFound
 	}
 
 	if v != nil {
@@ -275,7 +362,7 @@ func (c *Cache[K, V]) Get(key K, value *V) (time.Duration, error) {
 }
 
 // GetValue retrieves a value from the cache by key and returns the value and its TTL.
-func (c *Cache[K, V]) GetValue(key K) (V, time.Duration, error) {
+func (c Cache[K, V]) GetValue(key K) (V, time.Duration, error) {
 	value := zero[V]()
 	ttl, err := c.Get(key, &value)
 
@@ -283,7 +370,7 @@ func (c *Cache[K, V]) GetValue(key K) (V, time.Duration, error) {
 }
 
 // Set adds a key-value pair to the cache with a specified TTL.
-func (c *Cache[K, V]) Set(key K, value V, ttl time.Duration) error {
+func (c Cache[K, V]) Set(key K, value V, ttl time.Duration) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
@@ -294,47 +381,28 @@ func (c *Cache[K, V]) Set(key K, value V, ttl time.Duration) error {
 		return err
 	}
 
-	if err := c.err; err != nil {
-		return err
-	}
-
-	c.Store.Set(keyData, valueData, ttl)
-
-	return nil
+	return c.cache.Set(keyData, valueData, ttl)
 }
 
 // Delete removes a key-value pair from the cache.
-func (c *Cache[K, V]) Delete(key K) error {
+func (c Cache[K, V]) Delete(key K) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}
 
-	if err := c.err; err != nil {
-		return err
-	}
-
-	ok := c.Store.Delete(keyData)
-	if !ok {
-		return ErrKeyNotFound
-	}
-
-	return nil
+	return c.cache.Delete(keyData)
 }
 
 // UpdateInPlace retrieves a value from the cache, processes it using the provided function,
 // and then sets the result back into the cache with the same key.
-func (c *Cache[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error {
+func (c Cache[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error {
 	keyData, err := marshal(key)
 	if err != nil {
 		return err
 	}
 
-	if err := c.err; err != nil {
-		return err
-	}
-
-	return c.Store.UpdateInPlace(keyData, func(data []byte) ([]byte, error) {
+	return c.cache.UpdateInPlace(keyData, func(data []byte) ([]byte, error) {
 		var value V
 		if err := unmarshal(data, &value); err != nil {
 			return nil, err
@@ -351,17 +419,13 @@ func (c *Cache[K, V]) UpdateInPlace(key K, processFunc func(V) (V, error), ttl t
 
 // Memorize attempts to retrieve a value from the cache. If the retrieval fails,
 // it sets the result of the factory function into the cache and returns that result.
-func (c *Cache[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
+func (c Cache[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error) {
 	keyData, err := marshal(key)
 	if err != nil {
 		return zero[V](), err
 	}
 
-	if err := c.err; err != nil {
-		return zero[V](), err
-	}
-
-	data, err := c.Store.Memorize(keyData, func() ([]byte, error) {
+	data, err := c.cache.Memorize(keyData, func() ([]byte, error) {
 		value, err := factoryFunc()
 		if err != nil {
 			return nil, err
@@ -379,4 +443,19 @@ func (c *Cache[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Du
 	}
 
 	return value, nil
+}
+
+type Cacher[K any, V any] interface {
+	Clear()
+	Close() error
+	Cost() uint64
+	Delete(key K) error
+	Error() error
+	Flush() error
+	Get(key K, value *V) (time.Duration, error)
+	GetValue(key K) (V, time.Duration, error)
+	Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error)
+	Set(key K, value V, ttl time.Duration) error
+	SetConfig(options ...Option) error
+	UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error
 }

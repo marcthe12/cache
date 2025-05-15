@@ -228,7 +228,7 @@ func (s *store) Evict() bool {
 }
 
 // insert adds a new key-value pair to the store.
-func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
+func (s *store) insert(key, value []byte, ttl time.Duration) {
 	idx, hash := lookupIdx(s, key)
 	bucket := &s.Bucket[idx]
 
@@ -264,7 +264,7 @@ func (s *store) insert(key []byte, value []byte, ttl time.Duration) {
 }
 
 // Set adds or updates a key-value pair in the store with locking.
-func (s *store) Set(key []byte, value []byte, ttl time.Duration) {
+func (s *store) Set(key, value []byte, ttl time.Duration) {
 	s.Lock.Lock()
 	defer s.Lock.Unlock()
 

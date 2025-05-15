@@ -252,7 +252,7 @@ func TestEncodeDecodeNode(t *testing.T) {
 	}
 }
 
-func TestEncodeDecodeStrorage(t *testing.T) {
+func TestStoreSnapshot(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -297,7 +297,6 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 			t.Parallel()
 
 			var buf bytes.Buffer
-			e := newEncoder(&buf)
 
 			want := setupTestStore(t)
 			want.MaxCost = uint64(tt.maxCost)
@@ -310,18 +309,15 @@ func TestEncodeDecodeStrorage(t *testing.T) {
 				want.Set([]byte(k), []byte(v), 0)
 			}
 
-			if err := e.EncodeStore(want); err != nil {
+			if err := want.Snapshot(&buf); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
-			if err := e.Flush(); err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			reader := bytes.NewReader(buf.Bytes())
 
-			decoder := newDecoder(bytes.NewReader(buf.Bytes()))
 			got := setupTestStore(t)
 
-			if err := decoder.DecodeStore(got); err != nil {
+			if err := got.LoadSnapshot(reader); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
@@ -399,7 +395,7 @@ func BenchmarkStoreSnapshot(b *testing.B) {
 				b.Fatalf("unexpected error: %v", err)
 			}
 
-			b.SetBytes(int64(fileInfo.Size()))
+			b.SetBytes(fileInfo.Size())
 			b.ReportAllocs()
 
 			for b.Loop() {
@@ -433,7 +429,7 @@ func BenchmarkStoreLoadSnapshot(b *testing.B) {
 				b.Fatalf("unexpected error: %v", err)
 			}
 
-			b.SetBytes(int64(fileInfo.Size()))
+			b.SetBytes(fileInfo.Size())
 			b.ReportAllocs()
 
 			for b.Loop() {
