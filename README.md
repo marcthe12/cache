@@ -2,6 +2,10 @@
 
 An deamonless in-memory caching library with persistant snapshots.
 
+[Documentation](https://pkg.go.dev/go.sudomsg.com/cache)
+
+[Bug Tracker](https://github.com/marcthe12/cache)
+
 ## Features
 
 - **In-Memory Cache**: Fast access to cached data.
@@ -21,7 +25,7 @@ An deamonless in-memory caching library with persistant snapshots.
 To use the Cache Library in your Go project, you can install it using `go get`:
 
 ```sh
-go get github.com/marcthe12/cache
+go get go.sudomsg.com/cache
 ```
 
 ## Usage
@@ -34,7 +38,7 @@ go get github.com/marcthe12/cache
 package main
 
 import (
-	"github.com/marcthe12/cache"
+	"go.sudomsg.com/cache"
 	"time"
 	"log"
 )
@@ -68,7 +72,7 @@ To open an in-memory cache, use the `OpenMem` function:
 package main
 
 import (
-	"github.com/marcthe12/cache"
+	"go.sudomsg.com/cache"
 	"time"
 	"log"
 )
@@ -150,12 +154,4 @@ The Cache Library supports the following configuration options:
 
 - `Memorize`: Attempts to retrieve a value from the cache. If the retrieval fails, it sets the result of the factory function into the cache and returns that result. Note this locks the db duing the factory function which prevent concurent acces to the db during the operation.
 
-## Documentation
 
- For detailed documentation on the public API, you can use `godoc`:
-
-```sh
-godoc -http=:6060
-```
-
-Then open your browser and navigate to `http://localhost:6060/pkg/github.com/marcthe12/cache`.

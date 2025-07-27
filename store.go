@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marcthe12/cache/internal/pausedtimer"
+	"go.sudomsg.com/cache/internal/pausedtimer"
 )
 
 const (

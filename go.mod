@@ -1,4 +1,4 @@
-module github.com/marcthe12/cache
+module go.sudomsg.com/cache
 
 go 1.24.0
 

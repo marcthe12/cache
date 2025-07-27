@@ -12,6 +12,22 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// The Core interface for cache
+type Cacher[K any, V any] interface {
+	Clear()
+	Close() error
+	Cost() uint64
+	Delete(key K) error
+	Error() error
+	Flush() error
+	Get(key K, value *V) (time.Duration, error)
+	GetValue(key K) (V, time.Duration, error)
+	Set(key K, value V, ttl time.Duration) error
+	SetConfig(options ...Option) error
+	Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error)
+	UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error
+}
+
 // cache represents a cache database with file-backed storage and in-memory operation.
 type cache struct {
 	File  io.WriteSeeker
@@ -272,11 +288,15 @@ type Cache[K any, V any] struct {
 	*cache
 }
 
+var _ Cacher[any, any] = Cache[any, any]{}
+
 // The CacheRaw database. Can be initialized by either OpenRaw or OpenRawFile or OpenRawMem. Uses per Cache Locks.
 // CacheRaw represents a binary cache database with key-value pairs.
 type CacheRaw struct {
 	*cache
 }
+
+var _ Cacher[[]byte, []byte] = CacheRaw{}
 
 // OpenRaw opens a binary cache database with the specified options. If filename is empty then in-memory otherwise file backed.
 func OpenRaw(filename string, options ...Option) (CacheRaw, error) {
@@ -443,19 +463,4 @@ func (c Cache[K, V]) Memorize(key K, factoryFunc func() (V, error), ttl time.Dur
 	}
 
 	return value, nil
-}
-
-type Cacher[K any, V any] interface {
-	Clear()
-	Close() error
-	Cost() uint64
-	Delete(key K) error
-	Error() error
-	Flush() error
-	Get(key K, value *V) (time.Duration, error)
-	GetValue(key K) (V, time.Duration, error)
-	Memorize(key K, factoryFunc func() (V, error), ttl time.Duration) (V, error)
-	Set(key K, value V, ttl time.Duration) error
-	SetConfig(options ...Option) error
-	UpdateInPlace(key K, processFunc func(V) (V, error), ttl time.Duration) error
 }

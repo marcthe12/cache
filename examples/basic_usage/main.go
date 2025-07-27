@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marcthe12/cache"
+	"go.sudomsg.com/cache"
 )
 
 func main() {
